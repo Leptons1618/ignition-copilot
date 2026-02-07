@@ -1,0 +1,29 @@
+{
+  "ignition": {
+    "gateway_url": "http://localhost:8088",
+    "username": "anish",
+    "password": "developer",
+    "verify_ssl": false,
+    "timeout": 30,
+    "project": "ignition-copilot",
+    "ignition_api": "Test:zzX-CVaiOYnuQ5xgn3z00MOyAbVGDNvSU2LaiR5Ltlw"
+  },
+  "mcp": {
+    "server_name": "ignition-mcp",
+    "version": "1.0.0",
+    "capabilities": [
+      "tag_operations",
+      "historian",
+      "alarms",
+      "diagnostics"
+    ]
+  },
+  "tags": {
+    "default_provider": "default",
+    "base_path": "DemoPlant/MotorM12"
+  },
+  "historian": {
+    "default_range_hours": 1,
+    "max_records": 10000
+  }
+}

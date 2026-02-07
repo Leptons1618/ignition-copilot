@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ignition MCP Dashboard</title>
+<style>
+:root { --bg:#f0f2f5; --card:#fff; --primary:#4f6bed; --danger:#e74c3c; --success:#27ae60; --warn:#f39c12; --text:#222; --muted:#888; --border:#dde; --mono:'Consolas','Courier New',monospace; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);padding:20px;max-width:1400px;margin:0 auto;}
+h1{font-size:1.6em;margin-bottom:4px;}
+h2{font-size:1.15em;margin-bottom:10px;color:var(--primary);}
+.subtitle{color:var(--muted);font-size:.85em;margin-bottom:16px;}
+
+/* Tabs */
+.tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;}
+.tab{padding:8px 18px;border:none;background:var(--card);border-radius:6px 6px 0 0;cursor:pointer;font-size:.95em;border-bottom:3px solid transparent;}
+.tab.active{border-bottom-color:var(--primary);font-weight:600;color:var(--primary);}
+.panel{display:none;} .panel.active{display:block;}
+
+/* Cards */
+.card{background:var(--card);padding:16px 20px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08);margin-bottom:14px;}
+.row{display:flex;gap:12px;flex-wrap:wrap;}
+.col{flex:1;min-width:240px;}
+
+/* Stat tiles */
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;}
+.stat{padding:12px;background:#f8f9fa;border-radius:6px;border-left:4px solid var(--primary);}
+.stat.bad{border-left-color:var(--danger);background:#fff0f0;}
+.stat.warn{border-left-color:var(--warn);background:#fffbe6;}
+.stat .lbl{font-size:.78em;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;}
+.stat .val{font-size:1.5em;font-weight:700;}
+
+/* Inputs & buttons */
+input,select,textarea{padding:8px 10px;border:1px solid var(--border);border-radius:5px;font-size:.9em;font-family:inherit;width:100%;}
+textarea{font-family:var(--mono);font-size:.82em;resize:vertical;}
+.btn{padding:8px 18px;border:none;border-radius:5px;cursor:pointer;font-size:.9em;font-weight:600;color:#fff;display:inline-flex;align-items:center;gap:6px;}
+.btn-p{background:var(--primary);} .btn-s{background:var(--success);} .btn-d{background:var(--danger);} .btn-w{background:var(--warn);}
+.btn:hover{opacity:.9;} .btn:disabled{opacity:.5;cursor:default;}
+.btn-sm{padding:5px 12px;font-size:.8em;}
+.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+
+/* Tables */
+table{width:100%;border-collapse:collapse;font-size:.88em;}
+th,td{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;}
+th{background:#f8f9fa;font-weight:600;position:sticky;top:0;}
+.scroll-table{max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;}
+
+/* Log */
+.log{background:#1a1a2e;color:#0f0;padding:12px;border-radius:6px;font-family:var(--mono);font-size:.82em;max-height:220px;overflow-y:auto;white-space:pre-wrap;}
+
+/* Tree */
+.tree-node{padding:3px 0 3px 18px;cursor:pointer;font-size:.88em;}
+.tree-node:hover{background:#eef;}
+.tree-node .icon{display:inline-block;width:18px;text-align:center;}
+.tree-folder .icon::before{content:'📁';}
+.tree-tag .icon::before{content:'🏷️';}
+
+/* Connection badge */
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:.75em;font-weight:600;}
+.badge-ok{background:#d4edda;color:#155724;} .badge-fail{background:#f8d7da;color:#721c24;}
+
+/* Responsive */
+@media(max-width:768px){.row{flex-direction:column;} .stats{grid-template-columns:1fr 1fr;}}
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+  <div>
+    <h1>Ignition MCP Dashboard</h1>
+    <div class="subtitle">Generic tag browser, reader, writer, historian, alarms &amp; diagnostics</div>
+  </div>
+  <div id="connBadge" class="badge badge-fail">Checking...</div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="showTab('browse')">Browse</button>
+  <button class="tab" onclick="showTab('read')">Read</button>
+  <button class="tab" onclick="showTab('write')">Write</button>
+  <button class="tab" onclick="showTab('search')">Search</button>
+  <button class="tab" onclick="showTab('config')">Config</button>
+  <button class="tab" onclick="showTab('history')">Historian</button>
+  <button class="tab" onclick="showTab('alarms')">Alarms</button>
+  <button class="tab" onclick="showTab('system')">System</button>
+  <button class="tab" onclick="showTab('log')">Log</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- BROWSE TAB -->
+<!-- ============================================================ -->
+<div id="tab-browse" class="panel active">
+  <div class="card">
+    <h2>Tag Browser</h2>
+    <div class="toolbar">
+      <input id="browsePath" value="[default]" style="max-width:400px;" placeholder="Path e.g. [default]MyFolder">
+      <button class="btn btn-p" onclick="doBrowse()">Browse</button>
+      <label style="font-size:.85em;"><input type="checkbox" id="browseRecursive"> Recursive</label>
+    </div>
+    <div id="browseResult" class="scroll-table" style="min-height:120px;">
+      <p style="padding:20px;color:var(--muted);">Enter a path and click Browse</p>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- READ TAB -->
+<!-- ============================================================ -->
+<div id="tab-read" class="panel">
+  <div class="card">
+    <h2>Read Tags</h2>
+    <div class="toolbar">
+      <input id="readPaths" placeholder="Comma-separated paths, e.g. [default]Folder/Tag1, [default]Folder/Tag2" style="flex:1;">
+      <button class="btn btn-p" onclick="doRead()">Read</button>
+    </div>
+    <div id="readResult"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- WRITE TAB -->
+<!-- ============================================================ -->
+<div id="tab-write" class="panel">
+  <div class="card">
+    <h2>Write Tags</h2>
+    <div id="writeRows">
+      <div class="row" style="margin-bottom:8px;">
+        <input class="wr-path" placeholder="Full tag path" style="flex:2;">
+        <input class="wr-value" placeholder="Value" style="flex:1;">
+      </div>
+    </div>
+    <div class="toolbar">
+      <button class="btn btn-sm btn-p" onclick="addWriteRow()">+ Add Row</button>
+      <button class="btn btn-s" onclick="doWrite()">Write All</button>
+    </div>
+    <div id="writeResult" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SEARCH TAB -->
+<!-- ============================================================ -->
+<div id="tab-search" class="panel">
+  <div class="card">
+    <h2>Search Tags</h2>
+    <div class="toolbar">
+      <input id="searchRoot" value="[default]" style="max-width:200px;" placeholder="Root">
+      <input id="searchPattern" value="*" style="max-width:200px;" placeholder="Pattern (*Temp*)">
+      <select id="searchType" style="max-width:160px;">
+        <option value="">All types</option>
+        <option value="AtomicTag">AtomicTag</option>
+        <option value="Folder">Folder</option>
+        <option value="UdtInstance">UdtInstance</option>
+      </select>
+      <button class="btn btn-p" onclick="doSearch()">Search</button>
+    </div>
+    <div id="searchResult" class="scroll-table"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- CONFIG TAB -->
+<!-- ============================================================ -->
+<div id="tab-config" class="panel">
+  <div class="row">
+    <div class="col card">
+      <h2>Get Tag Config</h2>
+      <div class="toolbar">
+        <input id="cfgPath" placeholder="Full tag path" style="flex:1;">
+        <button class="btn btn-p" onclick="doGetConfig()">Get</button>
+      </div>
+      <div id="configResult" style="margin-top:10px;"></div>
+    </div>
+    <div class="col card">
+      <h2>Create Tag</h2>
+      <div style="display:grid;gap:6px;">
+        <input id="newBase" placeholder="Base path, e.g. [default]MyFolder">
+        <input id="newName" placeholder="Tag name">
+        <select id="newType">
+          <option value="AtomicTag">AtomicTag</option>
+          <option value="Folder">Folder</option>
+        </select>
+        <select id="newDataType">
+          <option value="Float8">Float8</option>
+          <option value="Float4">Float4</option>
+          <option value="Int4">Int4</option>
+          <option value="Int2">Int2</option>
+          <option value="Boolean">Boolean</option>
+          <option value="String">String</option>
+        </select>
+        <input id="newValue" placeholder="Initial value (0)">
+        <button class="btn btn-s" onclick="doCreateTag()">Create</button>
+      </div>
+      <div id="createResult" style="margin-top:10px;"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Delete Tags</h2>
+    <div class="toolbar">
+      <input id="delPaths" placeholder="Comma-separated full tag paths to delete" style="flex:1;">
+      <button class="btn btn-d" onclick="doDelete()">Delete</button>
+    </div>
+    <div id="deleteResult" style="margin-top:10px;"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- HISTORIAN TAB -->
+<!-- ============================================================ -->
+<div id="tab-history" class="panel">
+  <div class="card">
+    <h2>Query Historical Data</h2>
+    <div class="toolbar">
+      <input id="histPaths" placeholder="Comma-separated full tag paths" style="flex:2;">
+      <input id="histStart" value="-1h" style="max-width:140px;" placeholder="Start (-1h)">
+      <input id="histEnd" value="" style="max-width:140px;" placeholder="End (now)">
+      <input id="histSize" value="500" type="number" style="max-width:90px;" placeholder="Points">
+      <button class="btn btn-p" onclick="doHistory()">Query</button>
+    </div>
+    <div id="histResult" class="scroll-table"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- ALARMS TAB -->
+<!-- ============================================================ -->
+<div id="tab-alarms" class="panel">
+  <div class="card">
+    <h2>Active Alarms</h2>
+    <div class="toolbar">
+      <input id="alarmSource" placeholder="Source filter (optional)" style="max-width:200px;">
+      <select id="alarmPriority" style="max-width:140px;">
+        <option value="">All priorities</option>
+        <option value="Critical">Critical</option>
+        <option value="High">High</option>
+        <option value="Medium">Medium</option>
+        <option value="Low">Low</option>
+      </select>
+      <button class="btn btn-p" onclick="doAlarms()">Refresh</button>
+    </div>
+    <div id="alarmResult" class="scroll-table"></div>
+  </div>
+  <div class="card">
+    <h2>Alarm Journal</h2>
+    <div class="toolbar">
+      <input id="journalStart" value="-24h" style="max-width:120px;" placeholder="Start (-24h)">
+      <input id="journalSource" value="*" style="max-width:160px;" placeholder="Source (*)">
+      <button class="btn btn-p" onclick="doAlarmJournal()">Query</button>
+    </div>
+    <div id="journalResult" class="scroll-table"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SYSTEM TAB -->
+<!-- ============================================================ -->
+<div id="tab-system" class="panel">
+  <div class="card">
+    <h2>Gateway System Info</h2>
+    <button class="btn btn-p" onclick="doSystemInfo()" style="margin-bottom:10px;">Refresh</button>
+    <div id="sysResult"></div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- LOG TAB -->
+<!-- ============================================================ -->
+<div id="tab-log" class="panel">
+  <div class="card">
+    <h2>Activity Log</h2>
+    <button class="btn btn-sm btn-d" onclick="document.getElementById('logBox').textContent='Log cleared.\n';" style="margin-bottom:8px;">Clear</button>
+    <div class="log" id="logBox">Ready.\n</div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<script>
+// ---- helpers --------------------------------------------------- //
+function $(id){return document.getElementById(id);}
+function log(msg){const b=$('logBox');b.textContent+=new Date().toLocaleTimeString()+' | '+msg+'\n';b.scrollTop=b.scrollHeight;}
+async function api(path,opts){
+  try{const r=await fetch(path,opts);const d=await r.json();log((opts?.method||'GET')+' '+path+' → '+r.status);return d;}
+  catch(e){log('ERROR '+path+': '+e.message);return {error:e.message};}
+}
+function jsonTable(arr,keys){
+  if(!arr||!arr.length)return '<p style="color:var(--muted);padding:8px;">No data</p>';
+  if(!keys)keys=Object.keys(arr[0]);
+  let h='<table><tr>'+keys.map(k=>'<th>'+k+'</th>').join('')+'</tr>';
+  arr.forEach(r=>{h+='<tr>'+keys.map(k=>'<td>'+(r[k]!=null?r[k]:'')+'</td>').join('')+'</tr>';});
+  return h+'</table>';
+}
+function jsonPre(obj){return '<pre style="background:#f8f9fa;padding:10px;border-radius:5px;font-size:.82em;max-height:300px;overflow:auto;">'+JSON.stringify(obj,null,2)+'</pre>';}
+
+// ---- tabs ------------------------------------------------------ //
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector(`.tab[onclick*="'${name}'"]`).classList.add('active');
+  $('tab-'+name).classList.add('active');
+}
+
+// ---- connection check ------------------------------------------ //
+async function checkConn(){
+  const d=await api('/api/connection');
+  const b=$('connBadge');
+  if(d.connected){b.className='badge badge-ok';b.textContent='Connected';}
+  else{b.className='badge badge-fail';b.textContent='Disconnected';}
+}
+checkConn();
+
+// ---- browse ---------------------------------------------------- //
+async function doBrowse(){
+  const path=$('browsePath').value.trim()||'[default]';
+  const rec=$('browseRecursive').checked;
+  const d=await api('/api/browse?path='+encodeURIComponent(path)+'&recursive='+rec);
+  const tags=d.tags||[];
+  $('browseResult').innerHTML=jsonTable(tags,['name','path','tagType','hasChildren']);
+}
+
+// ---- read ------------------------------------------------------ //
+async function doRead(){
+  const paths=$('readPaths').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!paths.length){$('readResult').innerHTML='<p style="color:var(--danger);">Enter at least one path</p>';return;}
+  const d=await api('/api/read',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths})});
+  const results=d.results||[];
+  let html='<div class="stats">';
+  results.forEach(r=>{
+    const name=r.path?.split('/').pop()||r.path;
+    const cls=r.quality?.toLowerCase().includes('good')?'':'bad';
+    html+=`<div class="stat ${cls}"><div class="lbl">${name}</div><div class="val">${r.value!=null?r.value:'--'}</div><div class="lbl">${r.quality||''}</div></div>`;
+  });
+  $('readResult').innerHTML=html+'</div>';
+}
+
+// ---- write ----------------------------------------------------- //
+function addWriteRow(){
+  const div=document.createElement('div');div.className='row';div.style.marginBottom='8px';
+  div.innerHTML='<input class="wr-path" placeholder="Full tag path" style="flex:2;"><input class="wr-value" placeholder="Value" style="flex:1;"><button class="btn btn-sm btn-d" onclick="this.parentElement.remove()">x</button>';
+  $('writeRows').appendChild(div);
+}
+async function doWrite(){
+  const rows=$('writeRows').querySelectorAll('.row');
+  const writes=[];
+  rows.forEach(r=>{
+    const p=r.querySelector('.wr-path').value.trim();
+    let v=r.querySelector('.wr-value').value.trim();
+    if(!p)return;
+    // Auto-detect type
+    if(v==='true')v=true; else if(v==='false')v=false;
+    else if(!isNaN(v)&&v!=='')v=Number(v);
+    writes.push({path:p,value:v});
+  });
+  if(!writes.length){$('writeResult').innerHTML='<p style="color:var(--danger);">Add at least one write</p>';return;}
+  const d=await api('/api/write',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({writes})});
+  const results=d.results||[];
+  let html='<div class="stats">';
+  results.forEach(r=>{
+    const cls=r.success?'':'bad';
+    const name=r.path?.split('/').pop()||r.path;
+    html+=`<div class="stat ${cls}"><div class="lbl">${name}</div><div class="val">${r.success?'OK':'FAIL'}</div><div class="lbl">${r.quality||r.error||''}</div></div>`;
+  });
+  $('writeResult').innerHTML=html+'</div>';
+}
+
+// ---- search ---------------------------------------------------- //
+async function doSearch(){
+  const root=$('searchRoot').value.trim()||'[default]';
+  const pattern=$('searchPattern').value.trim()||'*';
+  const tt=$('searchType').value;
+  const d=await api(`/api/search?root=${encodeURIComponent(root)}&pattern=${encodeURIComponent(pattern)}&tagType=${tt}`);
+  $('searchResult').innerHTML=jsonTable(d.matches||[],['name','path','tagType']);
+}
+
+// ---- config ---------------------------------------------------- //
+async function doGetConfig(){
+  const path=$('cfgPath').value.trim();
+  if(!path){$('configResult').innerHTML='Enter a path';return;}
+  const d=await api('/api/tag_config?path='+encodeURIComponent(path));
+  $('configResult').innerHTML=jsonPre(d.config||d);
+}
+async function doCreateTag(){
+  const payload={base_path:$('newBase').value.trim(),name:$('newName').value.trim(),tag_type:$('newType').value,data_type:$('newDataType').value,value:$('newValue').value.trim()||0};
+  if(!payload.base_path||!payload.name){$('createResult').innerHTML='<p style="color:var(--danger);">Base path and name required</p>';return;}
+  const d=await api('/api/tag_config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  $('createResult').innerHTML=jsonPre(d);
+}
+async function doDelete(){
+  const paths=$('delPaths').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!paths.length){$('deleteResult').innerHTML='Enter at least one path';return;}
+  if(!confirm('Delete these tags?\n\n'+paths.join('\n')))return;
+  const d=await api('/api/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({paths})});
+  $('deleteResult').innerHTML=jsonPre(d);
+}
+
+// ---- historian ------------------------------------------------- //
+async function doHistory(){
+  const paths=$('histPaths').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if(!paths.length){$('histResult').innerHTML='Enter at least one path';return;}
+  const payload={paths,startTime:$('histStart').value.trim()||'-1h',endTime:$('histEnd').value.trim(),returnSize:parseInt($('histSize').value)||500};
+  const d=await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  let html='';
+  const data=d.data||{};
+  for(const[tp,info]of Object.entries(data)){
+    const recs=info.records||[];
+    html+=`<h3 style="margin:8px 0 4px;">${tp} (${recs.length} pts)</h3>`;
+    html+=jsonTable(recs.slice(0,100),['timestamp','value']);
+  }
+  $('histResult').innerHTML=html||'<p style="color:var(--muted);">No data returned</p>';
+}
+
+// ---- alarms ---------------------------------------------------- //
+async function doAlarms(){
+  const src=$('alarmSource').value.trim();
+  const pri=$('alarmPriority').value;
+  let url='/api/alarms?';
+  if(src)url+='source='+encodeURIComponent(src)+'&';
+  if(pri)url+='priority='+pri;
+  const d=await api(url);
+  $('alarmResult').innerHTML=(d.alarms?.length?jsonTable(d.alarms,['source','name','priority','state','activeTime','isAcked']):'<p style="padding:8px;color:var(--muted);">No active alarms</p>');
+}
+async function doAlarmJournal(){
+  const payload={startTime:$('journalStart').value.trim()||'-24h',source:$('journalSource').value.trim()||'*'};
+  const d=await api('/api/alarm_journal',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  $('journalResult').innerHTML=(d.events?.length?jsonTable(d.events,['source','name','priority','eventType','timestamp']):'<p style="padding:8px;color:var(--muted);">No alarm events</p>');
+}
+
+// ---- system ---------------------------------------------------- //
+async function doSystemInfo(){
+  const d=await api('/api/system_info');
+  const info=d.info||d;
+  let html='';
+  if(info.gateway){
+    html+='<div class="stats">';
+    for(const[k,v]of Object.entries(info.gateway)){html+=`<div class="stat"><div class="lbl">${k}</div><div class="val" style="font-size:1.1em;">${v}</div></div>`;}
+    html+='</div>';
+  }
+  if(info.performance){
+    html+='<h3 style="margin:12px 0 6px;">Performance</h3><div class="stats">';
+    for(const[k,v]of Object.entries(info.performance)){html+=`<div class="stat"><div class="lbl">${k}</div><div class="val" style="font-size:1.1em;">${v}</div></div>`;}
+    html+='</div>';
+  }
+  if(info.tags?.providers){
+    html+='<h3 style="margin:12px 0 6px;">Tag Providers</h3><ul>';
+    info.tags.providers.forEach(p=>{html+=`<li>${p}</li>`;});
+    html+='</ul>';
+  }
+  $('sysResult').innerHTML=html||jsonPre(info);
+}
+
+// ---- keyboard shortcut ----------------------------------------- //
+document.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){
+  const active=document.querySelector('.panel.active');
+  if(active){const btn=active.querySelector('.btn-p');if(btn)btn.click();}
+}});
+</script>
+</body>
+</html>

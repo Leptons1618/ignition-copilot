@@ -1,0 +1,131 @@
+{
+  "name": "DemoPlant",
+  "tagType": "Folder",
+  "tags": [
+    {
+      "name": "MotorM12",
+      "tagType": "Folder",
+      "tags": [
+        {
+          "dataType": "Float4",
+          "defaultValue": 1450.0,
+          "engUnit": "RPM",
+          "name": "Speed",
+          "tagType": "AtomicTag",
+          "value": 1450.0
+        },
+        {
+          "dataType": "Float4",
+          "defaultValue": 40.0,
+          "engUnit": "%",
+          "historyEnabled": true,
+          "historyProvider": "default",
+          "name": "LoadPercent",
+          "tagType": "AtomicTag",
+          "value": 40.0
+        },
+        {
+          "dataType": "String",
+          "defaultValue": "NORMAL",
+          "name": "SimState",
+          "tagType": "AtomicTag",
+          "value": "NORMAL"
+        },
+        {
+          "dataType": "Boolean",
+          "defaultValue": true,
+          "name": "Running",
+          "tagType": "AtomicTag",
+          "value": true
+        },
+        {
+          "dataType": "Boolean",
+          "defaultValue": true,
+          "name": "SimulatorEnabled",
+          "tagType": "AtomicTag",
+          "value": false
+        },
+        {
+          "dataType": "Boolean",
+          "defaultValue": false,
+          "name": "AlarmActive",
+          "tagType": "AtomicTag",
+          "value": false
+        },
+        {
+          "alarms": [
+            {
+              "mode": "AboveValue",
+              "name": "Alarm",
+              "priority": "High",
+              "setpointA": 85.0
+            }
+          ],
+          "dataType": "Float4",
+          "defaultValue": 45.0,
+          "engUnit": "?C",
+          "eventScripts": [
+            {
+              "eventid": "alarmActive",
+              "script": "\tsystem.tag.writeBlocking(\n    [\"[default]DemoPlant/MotorM12/AlarmActive\"],\n    [True]\n)"
+            },
+            {
+              "eventid": "alarmCleared",
+              "script": "\tsystem.tag.writeBlocking(\n    [\"[default]DemoPlant/MotorM12/AlarmActive\"],\n    [False]\n)"
+            }
+          ],
+          "historyEnabled": true,
+          "historyProvider": "default",
+          "name": "Temperature",
+          "tagType": "AtomicTag",
+          "value": 45.0
+        },
+        {
+          "dataType": "Boolean",
+          "defaultValue": false,
+          "name": "StartCommand",
+          "tagType": "AtomicTag",
+          "value": false
+        },
+        {
+          "dataType": "Boolean",
+          "defaultValue": false,
+          "name": "ResetAlarm",
+          "tagType": "AtomicTag",
+          "value": false
+        },
+        {
+          "dataType": "String",
+          "defaultValue": "Auto",
+          "name": "Mode",
+          "tagType": "AtomicTag",
+          "value": "Auto"
+        },
+        {
+          "dataType": "Float4",
+          "defaultValue": 8.5,
+          "engUnit": "A",
+          "historyEnabled": true,
+          "historyProvider": "default",
+          "name": "FanCurrent",
+          "tagType": "AtomicTag",
+          "value": 8.5
+        },
+        {
+          "dataType": "Int4",
+          "defaultValue": 0,
+          "name": "SimTime",
+          "tagType": "AtomicTag",
+          "value": 0
+        },
+        {
+          "dataType": "String",
+          "defaultValue": "",
+          "name": "FaultReason",
+          "tagType": "AtomicTag",
+          "value": ""
+        }
+      ]
+    }
+  ]
+}
