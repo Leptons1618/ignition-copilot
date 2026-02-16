@@ -1,70 +1,71 @@
 #!/usr/bin/env python3
 """
-Simple connection test using only basic HTTP
+Basic connectivity check for Ignition Gateway using config.json.
+ASCII-only output for Windows console compatibility.
 """
 
-import requests
 import json
-
-# Disable SSL warnings
+import requests
+from pathlib import Path
 import warnings
-warnings.filterwarnings('ignore')
+import sys
 
-print("=" * 70)
-print("IGNITION GATEWAY CONNECTION TEST")
-print("=" * 70)
-print()
+warnings.filterwarnings("ignore")
 
-# Load config
-with open('config.json') as f:
-    config = json.load(f)
 
-url = config['ignition']['gateway_url']
-user = config['ignition']['username']
-pwd = config['ignition']['password']
+def main() -> int:
+    print("=" * 70)
+    print("IGNITION GATEWAY CONNECTION TEST")
+    print("=" * 70)
+    print()
 
-print(f"Gateway URL: {url}")
-print(f"Username: {user}")
-print()
+    cfg_path = Path(__file__).parent / "config.json"
+    if not cfg_path.exists():
+        print("FAIL: config.json not found")
+        return 1
 
-# Test 1: Can we reach the gateway?
-print("Test 1: Basic Connectivity")
-print("-" * 70)
-try:
-    r = requests.get(url, timeout=5, verify=False)
-    print(f"✅ Gateway is reachable (Status: {r.status_code})")
-except Exception as e:
-    print(f"❌ Cannot reach gateway: {e}")
-    print(f"\nIs Ignition running? Try opening {url} in your browser.")
-    exit(1)
+    with cfg_path.open("r", encoding="utf-8") as f:
+        config = json.load(f)
 
-print()
+    url = config["ignition"]["gateway_url"]
+    user = config["ignition"]["username"]
+    pwd = config["ignition"]["password"]
 
-# Test 2: Can we authenticate?
-print("Test 2: Authentication")
-print("-" * 70)
-try:
-    r = requests.get(f"{url}/data/perspective/client", 
-                    auth=(user, pwd), timeout=5, verify=False)
-    if r.status_code in [200, 404]:  # 404 is OK, means no perspective but auth worked
-        print(f"✅ Authentication successful")
-    elif r.status_code == 401:
-        print(f"❌ Authentication failed - check username/password in config.json")
-        exit(1)
-    else:
-        print(f"⚠️  Unexpected status: {r.status_code}")
-except Exception as e:
-    print(f"❌ Auth test failed: {e}")
+    print(f"Gateway URL: {url}")
+    print(f"Username: {user}")
+    print()
 
-print()
+    print("Test 1: Basic Connectivity")
+    print("-" * 70)
+    try:
+        r = requests.get(url, timeout=5, verify=False)
+        print(f"PASS: Gateway is reachable (Status: {r.status_code})")
+    except Exception as exc:
+        print(f"FAIL: Cannot reach gateway: {exc}")
+        return 1
 
-# Summary
-print("=" * 70)
-print("RESULT: Ignition Gateway is accessible")
-print("=" * 70)
-print()
-print("✅ Gateway is running and reachable")
-print("✅ Authentication is working")
-print()
-print("Next: Test if tags are imported...")
-print("Run: python test_tags.py")
+    print()
+    print("Test 2: Authentication Probe")
+    print("-" * 70)
+    try:
+        r = requests.get(f"{url}/data/perspective/client", auth=(user, pwd), timeout=5, verify=False)
+        if r.status_code in (200, 404):
+            print("PASS: Authentication appears valid")
+        elif r.status_code == 401:
+            print("FAIL: Authentication failed")
+            return 1
+        else:
+            print(f"WARN: Unexpected status: {r.status_code}")
+    except Exception as exc:
+        print(f"FAIL: Authentication test error: {exc}")
+        return 1
+
+    print()
+    print("=" * 70)
+    print("RESULT: Gateway connectivity checks complete")
+    print("=" * 70)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -140,6 +140,7 @@ test("History -1h", "POST", "history_query",
 
 # ── 8. alarm_active ─────────────────────────────────────────────────── #
 header("8. alarm_active")
+# Alarm module may not be available — success:true with empty list is still PASS
 test("Active alarms (all)", "GET", "alarm_active")
 test("Active alarms (filtered)", "GET", "alarm_active",
      params={"source": "MotorM12"})
@@ -147,8 +148,9 @@ test("Active alarms (filtered)", "GET", "alarm_active",
 
 # ── 9. alarm_journal ────────────────────────────────────────────────── #
 header("9. alarm_journal")
+# Alarm journal may not be available — success:true with empty list is still PASS
 test("Alarm journal -24h", "POST", "alarm_journal",
-     json_body={"startTime": "-24h", "source": "*"})
+     json_body={"startTime": "-24h"})
 
 
 # ── 10. system_info ─────────────────────────────────────────────────── #

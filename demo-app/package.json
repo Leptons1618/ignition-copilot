@@ -1,0 +1,16 @@
+{
+  "name": "ignition-copilot-demo",
+  "version": "1.0.0",
+  "description": "Ignition Copilot Demo — AI-powered SCADA assistant with MCP, RAG, and dynamic charts",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && node index.js",
+    "client": "cd client && npx vite --port 3000",
+    "build": "cd client && npx vite build",
+    "start": "cd server && node index.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

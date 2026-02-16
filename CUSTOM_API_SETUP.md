@@ -1,121 +1,24 @@
-# Custom Tag API for Ignition
-# Add this as a WebDev resource in Ignition Designer
+> Updated: 2026-02-16. Canonical run/test workflow: scripts/README.md
 
-This Python script creates HTTP endpoints for tag read/write operations.
+# Custom API Setup
 
-## Installation Steps:
+Use this only if your Ignition project exposes non-default endpoint names or custom auth.
 
-1. Open Ignition Designer
-2. Go to **Project → WebDev Resources**
-3. Right-click → **Add Resource** → **Python Script**
-4. Name it: `tag_api`
-5. Mount Path: `/custom/tags`
-6. Paste the script below:
+## Where to update
 
-```python
-# Custom Tag API Endpoint
-# Mount at: /custom/tags
+- `demo-app/server/services/ignition.js`
+- `mcp-server/ignition_client.py`
+- `mcp-server/config.json`
 
-import system
-import json
+## Verify after changes
 
-def doGet(request, session):
-    """Handle GET requests - read a single tag"""
-    tagPath = request['params'].get('path', [None])[0]
-    
-    if not tagPath:
-        return {'json': {'error': 'Missing path parameter'}}
-    
-    try:
-        result = system.tag.readBlocking([tagPath])
-        if result:
-            value = result[0]
-            return {'json': {
-                'path': tagPath,
-                'value': value.value,
-                'quality': str(value.quality),
-                'timestamp': str(value.timestamp)
-            }}
-    except Exception as e:
-        return {'json': {'error': str(e)}}
-    
-    return {'json': {'error': 'Tag not found'}}
-
-def doPost(request, session):
-    """Handle POST requests - read/write multiple tags"""
-    try:
-        # Get request body
-        body = request.get('data', '{}')
-        data = system.util.jsonDecode(body)
-        
-        action = data.get('action', 'read')
-        
-        if action == 'read':
-            # Read multiple tags
-            tagPaths = data.get('tagPaths', [])
-            if not tagPaths:
-                return {'json': {'error': 'Missing tagPaths'}}
-            
-            results = system.tag.readBlocking(tagPaths)
-            response = []
-            
-            for i, result in enumerate(results):
-                response.append({
-                    'path': tagPaths[i],
-                    'value': result.value,
-                    'quality': str(result.quality),
-                    'timestamp': str(result.timestamp)
-                })
-            
-            return {'json': response}
-        
-        elif action == 'write':
-            # Write to tags
-            writes = data.get('writes', [])
-            if not writes:
-                return {'json': {'error': 'Missing writes array'}}
-            
-            tagPaths = [w['path'] for w in writes]
-            values = [w['value'] for w in writes]
-            
-            system.tag.writeBlocking(tagPaths, values)
-            
-            return {'json': {'success': True, 'count': len(writes)}}
-        
-        else:
-            return {'json': {'error': f'Unknown action: {action}'}}
-            
-    except Exception as e:
-        return {'json': {'error': str(e), 'type': str(type(e))}}
-
-# Entry point
-def doOptions(request, session):
-    """Handle OPTIONS for CORS"""
-    return {
-        'headers': {
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            'Access-Control-Allow-Headers': 'Content-Type'
-        }
-    }
+```powershell
+pwsh ./scripts/smoke.ps1
 ```
 
-## After Installation:
+and
 
-Your custom tag API will be available at:
-- **GET**: http://localhost:8088/custom/tags?path=[default]DemoPlant/MotorM12/Temperature
-- **POST**: http://localhost:8088/custom/tags
-  ```json
-  {
-    "action": "read",
-    "tagPaths": ["[default]DemoPlant/MotorM12/Temperature", "[default]DemoPlant/MotorM12/Running"]
-  }
-  ```
-
-## Test it:
-
-```bash
-curl "http://localhost:8088/custom/tags?path=[default]DemoPlant/MotorM12/Temperature" -u anish:password
+```powershell
+cd mcp-server
+.\.venv\Scripts\python.exe test_endpoints.py
 ```
-
-Once this endpoint is working, I'll update the client to use it!

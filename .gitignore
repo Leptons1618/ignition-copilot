@@ -75,3 +75,7 @@ site/
 *.backup
 temp/
 tmp/
+
+# Node.js
+node_modules/
+dist/
