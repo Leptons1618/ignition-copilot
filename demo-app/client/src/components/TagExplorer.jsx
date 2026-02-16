@@ -1,7 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Folder, FolderOpen, Binary, Hash, Type, Calendar, Search, Plus, Eye, PencilLine, X, FilePlus2, CheckSquare, Square, Layers } from 'lucide-react';
 import { browseTags, readTags, searchTags, writeTags } from '../api.js';
+import Button from './ui/Button.jsx';
+import Badge from './ui/Badge.jsx';
+import Modal from './ui/Modal.jsx';
+import { Textarea } from './ui/Input.jsx';
+import LoadingSpinner from './ui/LoadingSpinner.jsx';
+import EmptyState from './ui/EmptyState.jsx';
 
-export default function TagExplorer() {
+export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) {
   const [path, setPath] = useState('[default]');
   const [tags, setTags] = useState([]);
   const [values, setValues] = useState({});
@@ -11,26 +18,27 @@ export default function TagExplorer() {
   const [error, setError] = useState(null);
   const [breadcrumbs, setBreadcrumbs] = useState(['[default]']);
   const [selectedTags, setSelectedTags] = useState([]);
-  const [writeTag, setWriteTag] = useState(null); // { path, value }
+  const [writeTag, setWriteTag] = useState(null);
   const [writeValue, setWriteValue] = useState('');
   const [writeStatus, setWriteStatus] = useState(null);
+  const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchInput, setBatchInput] = useState('');
 
   const browse = useCallback(async (tagPath) => {
     setLoading(true);
     setError(null);
     try {
       const result = await browseTags(tagPath);
-      if (result.success) {
-        setTags(result.tags || []);
-        setPath(tagPath);
-        if (tagPath === '[default]') {
-          setBreadcrumbs(['[default]']);
-        } else {
-          const parts = tagPath.replace('[default]/', '').split('/');
-          setBreadcrumbs(['[default]', ...parts]);
-        }
-      } else {
+      if (!result.success) {
         setError(result.error || 'Browse failed');
+        return;
+      }
+      setTags(result.tags || []);
+      setPath(tagPath);
+      if (tagPath === '[default]') {
+        setBreadcrumbs(['[default]']);
+      } else {
+        setBreadcrumbs(['[default]', ...tagPath.replace('[default]/', '').split('/')]);
       }
     } catch (err) {
       setError(err.message);
@@ -41,12 +49,31 @@ export default function TagExplorer() {
 
   useEffect(() => { browse('[default]'); }, [browse]);
 
+  const selectedFullPaths = useMemo(
+    () => selectedTags.map(n => path === '[default]' ? `[default]/${n}` : `${path}/${n}`),
+    [selectedTags, path]
+  );
+
+  const leafTags = useMemo(
+    () => tags.filter(t => !t.hasChildren && t.tagType !== 'Folder' && t.tagType !== 'UdtInstance'),
+    [tags]
+  );
+
+  const allLeafsSelected = leafTags.length > 0 && leafTags.every(t => selectedTags.includes(t.name));
+
+  const toggleSelectAll = () => {
+    if (allLeafsSelected) {
+      setSelectedTags([]);
+    } else {
+      setSelectedTags(leafTags.map(t => t.name));
+    }
+  };
+
   const readSelected = async () => {
-    if (selectedTags.length === 0) return;
+    if (selectedFullPaths.length === 0) return;
     setLoading(true);
     try {
-      const paths = selectedTags.map(t => path === '[default]' ? `[default]/${t}` : `${path}/${t}`);
-      const result = await readTags(paths);
+      const result = await readTags(selectedFullPaths);
       if (result.success) {
         const vals = {};
         (result.results || []).forEach(v => { vals[v.path] = v; });
@@ -66,7 +93,7 @@ export default function TagExplorer() {
     try {
       const result = await searchTags(searchQuery.trim());
       setSearchResults(result.success ? (result.matches || []) : []);
-      if (!result.success) setError(result.error);
+      if (!result.success) setError(result.error || 'Search failed');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -87,213 +114,268 @@ export default function TagExplorer() {
       const result = await writeTags([{ path: writeTag, value: writeValue }]);
       if (result.success) {
         setWriteStatus('success');
-        // Re-read the tag to refresh the displayed value
         const readResult = await readTags([writeTag]);
         if (readResult.success && readResult.results) {
           const vals = {};
           readResult.results.forEach(v => { vals[v.path] = v; });
           setValues(prev => ({ ...prev, ...vals }));
         }
-        setTimeout(() => { setWriteTag(null); setWriteStatus(null); }, 1500);
+        setTimeout(() => { setWriteTag(null); setWriteStatus(null); }, 1000);
       } else {
         setWriteStatus('error');
       }
-    } catch (err) {
+    } catch {
       setWriteStatus('error');
     }
   };
 
   const toggleSelect = (tagName) => {
-    setSelectedTags(prev =>
-      prev.includes(tagName) ? prev.filter(t => t !== tagName) : [...prev, tagName]
-    );
+    setSelectedTags(prev => prev.includes(tagName) ? prev.filter(t => t !== tagName) : [...prev, tagName]);
   };
 
   const navigateFolder = (tag) => {
-    const newPath = path === '[default]' ? `[default]/${tag.name}` : `${path}/${tag.name}`;
-    browse(newPath);
+    const next = path === '[default]' ? `[default]/${tag.name}` : `${path}/${tag.name}`;
+    browse(next);
     setSearchResults(null);
     setSelectedTags([]);
   };
 
   const navigateBreadcrumb = (idx) => {
-    if (idx === 0) {
-      browse('[default]');
-    } else {
-      const newPath = '[default]/' + breadcrumbs.slice(1, idx + 1).join('/');
-      browse(newPath);
-    }
+    const next = idx === 0 ? '[default]' : `[default]/${breadcrumbs.slice(1, idx + 1).join('/')}`;
+    browse(next);
     setSearchResults(null);
     setSelectedTags([]);
   };
 
-  const getTagIcon = (tag) => {
-    if (tag.hasChildren || tag.tagType === 'Folder' || tag.tagType === 'UdtInstance') return '📁';
-    const dt = (tag.dataType || '').toLowerCase();
-    if (dt.includes('bool')) return '🔘';
-    if (dt.includes('int') || dt.includes('float') || dt.includes('double')) return '🔢';
-    if (dt.includes('string')) return '🔤';
-    if (dt.includes('date')) return '📅';
-    return '🏷️';
+  const addSelectedToWorkspace = () => {
+    if (selectedFullPaths.length > 0) onAddWorkspaceTags?.(selectedFullPaths);
+  };
+
+  const addBatchToWorkspace = () => {
+    const paths = batchInput
+      .split(/\r?\n|,/)
+      .map(v => v.trim())
+      .filter(Boolean);
+    if (paths.length === 0) return;
+    onAddWorkspaceTags?.(paths);
+    setBatchInput('');
+    setShowBatchModal(false);
+  };
+
+  const iconForTag = (tag) => {
+    if (tag.hasChildren || tag.tagType === 'Folder' || tag.tagType === 'UdtInstance') return <Folder size={15} />;
+    const dt = String(tag.dataType || '').toLowerCase();
+    if (dt.includes('bool')) return <Binary size={15} />;
+    if (dt.includes('int') || dt.includes('float') || dt.includes('double')) return <Hash size={15} />;
+    if (dt.includes('string')) return <Type size={15} />;
+    if (dt.includes('date')) return <Calendar size={15} />;
+    return <FilePlus2 size={15} />;
   };
 
   return (
-    <div className="h-full flex flex-col p-4 overflow-hidden bg-gray-50">
-      {/* Search bar */}
-      <div className="flex gap-2 mb-4">
-        <input
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && doSearch()}
-          placeholder="Search tags by name..."
-          className="flex-1 bg-white border border-gray-200 rounded-lg px-4 py-2 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 shadow-sm"
-        />
-        <button onClick={doSearch} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition-colors shadow-sm">
-          Search
-        </button>
-      </div>
-
-      {/* Breadcrumbs */}
-      <div className="flex items-center gap-1 mb-3 text-sm text-gray-500 flex-wrap">
-        {breadcrumbs.map((crumb, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && <span className="text-gray-300">/</span>}
-            <button
-              onClick={() => navigateBreadcrumb(i)}
-              className={`hover:text-blue-600 transition-colors ${i === breadcrumbs.length - 1 ? 'text-gray-900 font-medium' : ''}`}
-            >
-              {crumb}
-            </button>
-          </React.Fragment>
-        ))}
-      </div>
-
-      {error && (
-        <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-          {error}
+    <div className="h-full flex flex-col p-4 overflow-hidden bg-gray-50 gap-3">
+      {/* Search + actions bar */}
+      <div className="flex gap-2 items-center">
+        <div className="relative flex-1">
+          <Search size={15} className="absolute left-3 top-2.5 text-gray-400" />
+          <input
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && doSearch()}
+            placeholder="Search tags by name or pattern"
+            className="w-full bg-white border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+          />
         </div>
-      )}
+        <Button variant="primary" size="sm" onClick={doSearch}>
+          <Search size={14} /> Search
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setShowBatchModal(true)}>
+          <Layers size={14} /> Batch Add
+        </Button>
+      </div>
+
+      {/* Breadcrumb */}
+      <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-sm text-gray-700">
+          <FolderOpen size={15} className="text-blue-600 shrink-0" />
+          {breadcrumbs.map((crumb, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span className="text-gray-300">/</span>}
+              <button onClick={() => navigateBreadcrumb(i)} className={`hover:text-blue-600 transition-colors ${i === breadcrumbs.length - 1 ? 'font-semibold text-gray-900' : ''}`}>
+                {crumb}
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
+
+      {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>}
 
       {/* Write dialog */}
       {writeTag && (
-        <div className="mb-3 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium text-blue-900">Write Tag Value</span>
-            <button onClick={() => { setWriteTag(null); setWriteStatus(null); }} className="text-gray-400 hover:text-gray-600 text-lg">&times;</button>
+            <button onClick={() => { setWriteTag(null); setWriteStatus(null); }} className="text-gray-500 hover:text-gray-700"><X size={16} /></button>
           </div>
           <div className="text-xs text-blue-700 font-mono mb-2">{writeTag}</div>
           <div className="flex gap-2">
-            <input
-              value={writeValue}
-              onChange={e => setWriteValue(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && doWrite()}
-              placeholder="New value..."
-              className="flex-1 bg-white border border-blue-200 rounded px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:border-blue-500"
-              autoFocus
-            />
-            <button
-              onClick={doWrite}
-              disabled={writeStatus === 'writing'}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 rounded text-white text-sm font-medium transition-colors"
-            >
-              {writeStatus === 'writing' ? '...' : writeStatus === 'success' ? '✓ Written' : 'Write'}
-            </button>
+            <input value={writeValue} onChange={e => setWriteValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && doWrite()} className="flex-1 bg-white border border-blue-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <Button variant={writeStatus === 'success' ? 'success' : 'primary'} size="sm" onClick={doWrite} disabled={writeStatus === 'writing'}>
+              {writeStatus === 'writing' ? 'Writing...' : writeStatus === 'success' ? 'Written' : 'Write'}
+            </Button>
           </div>
-          {writeStatus === 'error' && <div className="text-xs text-red-600 mt-1">Write failed — check tag path and value type</div>}
         </div>
       )}
 
-      {/* Tag list */}
-      <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg bg-white shadow-sm">
-        {loading ? (
-          <div className="flex items-center justify-center h-full text-gray-400">Loading...</div>
-        ) : searchResults ? (
-          <div className="p-2 space-y-1">
-            <div className="flex items-center justify-between px-2 py-1 mb-2">
-              <span className="text-sm text-gray-500">{searchResults.length} results for "{searchQuery}"</span>
-              <button onClick={() => setSearchResults(null)} className="text-xs text-gray-400 hover:text-gray-700">Clear</button>
-            </div>
-            {searchResults.map((tag, i) => (
-              <div key={i} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg text-sm">
-                <span>{getTagIcon(tag)}</span>
-                <span className="text-gray-900 flex-1 font-mono text-xs">{tag.fullPath || tag.name}</span>
-                <span className="text-gray-400 text-xs">{tag.dataType || tag.tagType}</span>
-              </div>
-            ))}
-            {searchResults.length === 0 && (
-              <div className="text-center py-8 text-gray-400">No tags found</div>
-            )}
-          </div>
-        ) : (
-          <div className="p-2 space-y-0.5">
-            {tags.length === 0 ? (
-              <div className="text-center py-8 text-gray-400">No tags at this path</div>
-            ) : tags.map((tag, i) => {
-              const isFolder = tag.hasChildren || tag.tagType === 'Folder' || tag.tagType === 'UdtInstance';
-              const isSelected = selectedTags.includes(tag.name);
-              const fullPath = path === '[default]' ? `[default]/${tag.name}` : `${path}/${tag.name}`;
-              const val = values[fullPath];
+      {/* Selection toolbar */}
+      {selectedTags.length > 0 && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+          <Badge color="info">{selectedTags.length} selected</Badge>
+          <Button variant="secondary" size="xs" onClick={readSelected}>
+            <Eye size={13} /> Read Values
+          </Button>
+          <Button variant="primary" size="xs" onClick={addSelectedToWorkspace}>
+            <Plus size={13} /> Add to Workspace
+          </Button>
+          <Button variant="ghost" size="xs" onClick={() => setSelectedTags([])}>
+            <X size={13} /> Clear
+          </Button>
+        </div>
+      )}
 
-              return (
-                <div
-                  key={i}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
-                    isSelected ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50 border border-transparent'
-                  }`}
-                  onClick={() => isFolder ? navigateFolder(tag) : toggleSelect(tag.name)}
-                >
-                  <span className="text-base">{getTagIcon(tag)}</span>
-                  <span className="flex-1 text-gray-900 font-mono text-xs">{tag.name}</span>
-                  {tag.dataType && <span className="text-gray-400 text-xs">{tag.dataType}</span>}
-                  {tag.tagType && <span className="text-gray-300 text-xs">{tag.tagType}</span>}
-                  {val && (
-                    <>
-                      <span className={`text-xs font-mono px-2 py-0.5 rounded ${
-                        val.quality === 'Good' ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'
-                      }`}>
+      {/* Main content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 flex-1 min-h-0">
+        <div className="lg:col-span-2 border border-gray-200 rounded-lg bg-white overflow-y-auto">
+          {loading ? (
+            <div className="h-full flex items-center justify-center">
+              <LoadingSpinner label="Loading tags..." />
+            </div>
+          ) : searchResults ? (
+            <SearchResults
+              results={searchResults}
+              onClear={() => setSearchResults(null)}
+              onAdd={(p) => onAddWorkspaceTags?.([p])}
+              iconForTag={iconForTag}
+            />
+          ) : (
+            <div className="p-2 space-y-0.5">
+              {/* Select all header */}
+              {leafTags.length > 0 && (
+                <button onClick={toggleSelectAll} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 w-full text-left">
+                  {allLeafsSelected ? <CheckSquare size={14} className="text-blue-600" /> : <Square size={14} />}
+                  {allLeafsSelected ? 'Deselect all' : `Select all ${leafTags.length} leaf tags`}
+                </button>
+              )}
+              {tags.length === 0 && (
+                <EmptyState icon={FolderOpen} title="No tags at this path" description="Navigate to a folder containing tags." />
+              )}
+              {tags.map((tag, i) => {
+                const isFolder = tag.hasChildren || tag.tagType === 'Folder' || tag.tagType === 'UdtInstance';
+                const isSelected = selectedTags.includes(tag.name);
+                const fullPath = path === '[default]' ? `[default]/${tag.name}` : `${path}/${tag.name}`;
+                const val = values[fullPath];
+                const inWorkspace = workspaceTags.includes(fullPath);
+
+                return (
+                  <div
+                    key={`${tag.name}-${i}`}
+                    className={`group flex items-center gap-2 px-3 py-2 rounded border text-sm cursor-pointer transition-colors ${
+                      isSelected ? 'bg-blue-50 border-blue-200' :
+                      inWorkspace ? 'bg-green-50/50 border-green-100' :
+                      'border-transparent hover:bg-gray-50'
+                    }`}
+                    onClick={() => isFolder ? navigateFolder(tag) : toggleSelect(tag.name)}
+                  >
+                    <span className={isFolder ? 'text-blue-500' : 'text-gray-500'}>{iconForTag(tag)}</span>
+                    <span className="flex-1 text-gray-900 font-mono text-xs">{tag.name}</span>
+                    {tag.dataType && <span className="text-gray-400 text-xs">{tag.dataType}</span>}
+                    {val && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-green-50 text-green-700 font-mono">
                         {String(val.value).slice(0, 20)}
                       </span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); openWriteDialog(fullPath, val.value); }}
-                        className="text-xs px-1.5 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded border border-amber-200 transition-colors"
-                        title="Write value"
-                      >
-                        ✏️
-                      </button>
-                    </>
-                  )}
-                  {isFolder && <span className="text-gray-300">→</span>}
+                    )}
+                    {inWorkspace && <Badge color="success">WS</Badge>}
+                    {!isFolder && (
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => { e.stopPropagation(); onAddWorkspaceTags?.([fullPath]); }} className="text-gray-400 hover:text-blue-600 p-0.5" title="Add to workspace">
+                          <Plus size={14} />
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); openWriteDialog(fullPath, val?.value); }} className="text-gray-400 hover:text-amber-600 p-0.5" title="Write value">
+                          <PencilLine size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Sidebar */}
+        <aside className="border border-gray-200 rounded-lg bg-white p-3 overflow-y-auto space-y-4">
+          <div>
+            <div className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-1">
+              Workspace Tags
+              <Badge color="neutral">{workspaceTags.length}</Badge>
+            </div>
+            <div className="max-h-48 overflow-y-auto space-y-1">
+              {workspaceTags.length === 0 && <div className="text-xs text-gray-400">No workspace tags yet.</div>}
+              {workspaceTags.map(t => (
+                <div key={t} className="text-xs font-mono text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 truncate" title={t}>
+                  {t.split('/').pop()}
+                  <span className="text-gray-400 ml-1">({t.split('/').slice(0, -1).join('/')})</span>
                 </div>
-              );
-            })}
+              ))}
+            </div>
           </div>
-        )}
+        </aside>
       </div>
 
-      {/* Footer actions */}
-      {selectedTags.length > 0 && (
-        <div className="mt-3 flex items-center gap-3 text-sm">
-          <span className="text-gray-500">{selectedTags.length} selected</span>
-          <button onClick={readSelected} className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded-lg text-white text-sm transition-colors shadow-sm">
-            Read Values
-          </button>
-          <button
-            onClick={() => {
-              if (selectedTags.length === 1) {
-                const fullPath = path === '[default]' ? `[default]/${selectedTags[0]}` : `${path}/${selectedTags[0]}`;
-                const val = values[fullPath];
-                openWriteDialog(fullPath, val?.value);
-              }
-            }}
-            disabled={selectedTags.length !== 1}
-            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-200 disabled:text-gray-400 rounded-lg text-white text-sm transition-colors shadow-sm"
-          >
-            Write Value
-          </button>
-          <button onClick={() => setSelectedTags([])} className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-lg text-gray-700 text-sm transition-colors">
-            Clear
+      {/* Batch add modal */}
+      {showBatchModal && (
+        <Modal title="Batch Add Tags" onClose={() => setShowBatchModal(false)}>
+          <p className="text-sm text-gray-600 mb-3">Enter tag paths, one per line or comma-separated.</p>
+          <Textarea
+            rows={8}
+            value={batchInput}
+            onChange={e => setBatchInput(e.target.value)}
+            placeholder={"[default]/DemoPlant/MotorM12/Temperature\n[default]/DemoPlant/MotorM12/Vibration\n[default]/DemoPlant/MotorM12/Speed"}
+          />
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" size="sm" onClick={() => setShowBatchModal(false)}>Cancel</Button>
+            <Button variant="primary" size="sm" onClick={addBatchToWorkspace} disabled={!batchInput.trim()}>
+              <Plus size={14} /> Add to Workspace
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function SearchResults({ results, onClear, onAdd, iconForTag }) {
+  return (
+    <div className="p-2 space-y-1">
+      <div className="flex items-center justify-between px-2 py-1 mb-2">
+        <span className="text-sm text-gray-600">
+          <Badge color="neutral">{results.length}</Badge> results
+        </span>
+        <Button variant="ghost" size="xs" onClick={onClear}>Clear</Button>
+      </div>
+      {results.map((tag, i) => (
+        <div key={`${tag.fullPath || tag.name}-${i}`} className="group flex items-center gap-2 px-3 py-2 bg-gray-50 rounded border border-gray-100 text-sm hover:border-gray-200 transition-colors">
+          <span className="text-gray-500">{iconForTag(tag)}</span>
+          <span className="flex-1 text-gray-900 font-mono text-xs truncate">{tag.fullPath || tag.name}</span>
+          <span className="text-gray-400 text-xs">{tag.dataType || tag.tagType}</span>
+          <button onClick={() => onAdd(tag.fullPath || tag.path || tag.name)} className="text-gray-400 hover:text-blue-600 p-0.5" title="Add to workspace">
+            <Plus size={14} />
           </button>
         </div>
+      ))}
+      {results.length === 0 && (
+        <EmptyState icon={Search} title="No tags found" description="Try a different search pattern." />
       )}
     </div>
   );

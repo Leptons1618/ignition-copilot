@@ -28,6 +28,17 @@ function Wait-Port {
   return $false
 }
 
+function Get-PortOwnerPid {
+  param([int]$Port)
+  try {
+    $line = netstat -ano | Select-String (":{0}\s+.*LISTENING\s+(\d+)$" -f $Port) | Select-Object -First 1
+    if (-not $line) { return $null }
+    $m = [regex]::Match($line.ToString(), "LISTENING\s+(\d+)$")
+    if ($m.Success) { return [int]$m.Groups[1].Value }
+  } catch {}
+  return $null
+}
+
 $pids = @{}
 if (Test-Path $pidsFile) {
   try { $pids = (Get-Content -Raw $pidsFile | ConvertFrom-Json -AsHashtable) } catch { $pids = @{} }
@@ -54,6 +65,12 @@ if ($RebuildFrontend) {
   exit 1
 }
 Pop-Location
+
+if (Get-PortOwnerPid -Port 3001) {
+  $owner = Get-PortOwnerPid -Port 3001
+  Write-Host ("Port 3001 is already in use by PID {0}. Stop that process or run scripts/stop-all.ps1 first." -f $owner) -ForegroundColor Red
+  exit 1
+}
 
 Write-Host "Starting demo backend (serves built frontend)..." -ForegroundColor Cyan
 $serverOut = Join-Path $logsDir "demo-server.out.log"

@@ -1,5 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import {
+  Server, Cpu, BookOpen, Wrench, RefreshCw, Activity, Globe, Database,
+  CheckCircle2, XCircle, AlertCircle, Layers,
+} from 'lucide-react';
 import { getIgnitionStatus, getChatTools, getRAGStats, getChatModels } from '../api.js';
+import Button from './ui/Button.jsx';
+import Badge from './ui/Badge.jsx';
+import Card from './ui/Card.jsx';
+import StatusDot from './ui/StatusDot.jsx';
+import LoadingSpinner from './ui/LoadingSpinner.jsx';
 
 export default function SystemStatus() {
   const [status, setStatus] = useState(null);
@@ -30,44 +39,36 @@ export default function SystemStatus() {
 
   useEffect(() => { refresh(); }, []);
 
-  const StatusCard = ({ title, badge, children, state }) => (
-    <div className={`bg-white border rounded-xl p-5 shadow-sm ${
-      state === 'ok' ? 'border-green-200' : state === 'error' ? 'border-red-200' : 'border-gray-200'
-    }`}>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700 font-semibold">{badge}</span>
-        <h3 className="text-gray-900 font-semibold">{title}</h3>
-        {state && (
-          <span className={`ml-auto text-xs px-2 py-1 rounded-full font-medium ${
-            state === 'ok' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
-          }`}>
-            {state === 'ok' ? 'Online' : 'Offline'}
-          </span>
-        )}
-      </div>
-      {children}
-    </div>
-  );
-
   return (
     <div className="h-full overflow-y-auto p-4 bg-gray-50">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900">System Status</h2>
+            <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <Activity size={22} className="text-blue-600" />
+              System Status
+            </h2>
             <p className="text-gray-500 text-sm">Monitor all connected services</p>
           </div>
-          <button
-            onClick={refresh}
-            disabled={loading}
-            className="px-4 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg text-gray-700 text-sm transition-colors shadow-sm"
-          >
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+            {loading ? <LoadingSpinner size={14} /> : <RefreshCw size={14} />}
             {loading ? 'Refreshing...' : 'Refresh'}
-          </button>
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <StatusCard title="Ignition Gateway" badge="GW" state={status?.connected ? 'ok' : 'error'}>
+          <Card
+            header={
+              <div className="flex items-center gap-2">
+                <Server size={16} className="text-blue-600" />
+                <span className="font-semibold text-gray-900">Ignition Gateway</span>
+                <span className="ml-auto">
+                  {status?.connected ? <Badge color="success">Online</Badge> : <Badge color="error">Offline</Badge>}
+                </span>
+              </div>
+            }
+            state={status?.connected ? 'ok' : 'error'}
+          >
             {status?.connected ? (
               <div className="space-y-2 text-sm">
                 {status.info?.info?.gateway?.systemName && (
@@ -80,25 +81,35 @@ export default function SystemStatus() {
                   <InfoRow label="Edition" value={status.info.info.gateway.edition} />
                 )}
                 {status.info?.info?.gateway?.state && (
-                  <InfoRow label="State" value={status.info.info.gateway.state} />
+                  <InfoRow icon={<StatusDot color={status.info.info.gateway.state === 'RUNNING' ? 'success' : 'warning'} pulse />} label="State" value={status.info.info.gateway.state} />
                 )}
-                <InfoRow label="URL" value="http://localhost:8088" />
-                <InfoRow label="Project" value="ignition-copilot" />
+                <InfoRow icon={<Globe size={13} className="text-gray-400" />} label="URL" value="http://localhost:8088" />
               </div>
             ) : (
               <p className="text-red-600 text-sm">{status?.error || 'Cannot connect to Ignition Gateway'}</p>
             )}
-          </StatusCard>
+          </Card>
 
-          <StatusCard title="Ollama LLM" badge="LLM" state={models.length > 0 ? 'ok' : 'error'}>
+          <Card
+            header={
+              <div className="flex items-center gap-2">
+                <Cpu size={16} className="text-purple-600" />
+                <span className="font-semibold text-gray-900">Ollama LLM</span>
+                <span className="ml-auto">
+                  {models.length > 0 ? <Badge color="success">Online</Badge> : <Badge color="error">Offline</Badge>}
+                </span>
+              </div>
+            }
+            state={models.length > 0 ? 'ok' : 'error'}
+          >
             {models.length > 0 ? (
               <div className="space-y-2 text-sm">
-                <InfoRow label="URL" value="http://localhost:11434" />
+                <InfoRow icon={<Globe size={13} className="text-gray-400" />} label="URL" value="http://localhost:11434" />
                 <InfoRow label="Models" value={`${models.length} available`} />
                 <div className="mt-2 space-y-1">
                   {models.map((m, i) => (
                     <div key={i} className="flex items-center gap-2 text-xs">
-                      <span className="text-green-600">OK</span>
+                      <CheckCircle2 size={12} className="text-green-600" />
                       <span className="text-gray-700 font-mono">{m.name || m}</span>
                       {m.size && <span className="text-gray-400">{(m.size / 1e9).toFixed(1)}GB</span>}
                     </div>
@@ -108,12 +119,23 @@ export default function SystemStatus() {
             ) : (
               <p className="text-red-600 text-sm">Cannot connect to Ollama</p>
             )}
-          </StatusCard>
+          </Card>
 
-          <StatusCard title="RAG Knowledge Base" badge="RAG" state={ragStats ? 'ok' : 'error'}>
+          <Card
+            header={
+              <div className="flex items-center gap-2">
+                <BookOpen size={16} className="text-green-600" />
+                <span className="font-semibold text-gray-900">RAG Knowledge Base</span>
+                <span className="ml-auto">
+                  {ragStats ? <Badge color="success">Online</Badge> : <Badge color="warning">Unavailable</Badge>}
+                </span>
+              </div>
+            }
+            state={ragStats ? 'ok' : 'error'}
+          >
             {ragStats ? (
               <div className="space-y-2 text-sm">
-                <InfoRow label="Documents" value={ragStats.documentCount || 0} />
+                <InfoRow icon={<Database size={13} className="text-gray-400" />} label="Documents" value={ragStats.documentCount || 0} />
                 <InfoRow label="Sources" value={ragStats.sources?.length || 0} />
                 <InfoRow label="Model" value="nomic-embed-text" />
                 <InfoRow label="Status" value={ragStats.initialized ? 'Initialized' : 'Not initialized'} />
@@ -121,14 +143,25 @@ export default function SystemStatus() {
             ) : (
               <p className="text-amber-600 text-sm">RAG not initialized</p>
             )}
-          </StatusCard>
+          </Card>
 
-          <StatusCard title="Available Tools" badge="TOOLS" state={tools.length > 0 ? 'ok' : 'error'}>
+          <Card
+            header={
+              <div className="flex items-center gap-2">
+                <Wrench size={16} className="text-amber-600" />
+                <span className="font-semibold text-gray-900">Available Tools</span>
+                <span className="ml-auto">
+                  {tools.length > 0 ? <Badge color="success">{tools.length} tools</Badge> : <Badge color="error">None</Badge>}
+                </span>
+              </div>
+            }
+            state={tools.length > 0 ? 'ok' : 'error'}
+          >
             {tools.length > 0 ? (
               <div className="space-y-1 max-h-48 overflow-y-auto">
                 {tools.map((tool, i) => (
                   <div key={i} className="flex items-center gap-2 text-xs py-1">
-                    <span className="text-blue-600">FN</span>
+                    <Layers size={11} className="text-blue-500 shrink-0" />
                     <span className="text-gray-700 font-mono">{tool.name || tool}</span>
                     {tool.description && <span className="text-gray-400 truncate flex-1">{tool.description}</span>}
                   </div>
@@ -137,11 +170,14 @@ export default function SystemStatus() {
             ) : (
               <p className="text-gray-400 text-sm">No tools loaded</p>
             )}
-          </StatusCard>
+          </Card>
         </div>
 
         <div className="mt-6 bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-gray-900 font-semibold mb-4">Architecture</h3>
+          <h3 className="text-gray-900 font-semibold mb-4 flex items-center gap-2">
+            <Layers size={16} className="text-blue-600" />
+            Architecture
+          </h3>
           <div className="grid grid-cols-3 gap-3 text-center text-sm">
             <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
               <div className="text-gray-900 font-medium">React Frontend</div>
@@ -176,10 +212,13 @@ export default function SystemStatus() {
   );
 }
 
-function InfoRow({ label, value }) {
+function InfoRow({ icon, label, value }) {
   return (
     <div className="flex justify-between items-center">
-      <span className="text-gray-500">{label}</span>
+      <span className="text-gray-500 inline-flex items-center gap-1">
+        {icon}
+        {label}
+      </span>
       <span className="text-gray-800 font-mono text-xs">{String(value)}</span>
     </div>
   );

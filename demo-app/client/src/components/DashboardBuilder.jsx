@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import {
+  LayoutDashboard, Play, Save, FolderOpen, Trash2, RefreshCw, MessageSquare,
+  HeartPulse, Bell, LineChart as ChartIcon, Gauge, Layers,
+} from 'lucide-react';
+import {
   generateDashboard,
   listDashboardPresets,
   saveDashboardPreset,
@@ -8,38 +12,17 @@ import {
   deleteDashboardPreset,
   loadDashboardPreset,
 } from '../api.js';
-
-const COLORS = ['#2563eb', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2'];
+import { mergeSeriesData, formatTime, getColor } from '../lib/chartUtils.js';
+import Button from './ui/Button.jsx';
+import Badge from './ui/Badge.jsx';
+import Card from './ui/Card.jsx';
+import LoadingSpinner from './ui/LoadingSpinner.jsx';
 
 const EXAMPLES = [
   'Build a motor reliability dashboard for MotorM12 with temperature, vibration, load, current, speed.',
   'Create a pump performance dashboard with pressure, flow, level, and run status for the last 6 hours.',
   'Generate an operations dashboard focused on alarms and asset health for DemoPlant.',
 ];
-
-function buildChartData(series = []) {
-  const merged = {};
-  const names = [];
-  for (const s of series) {
-    const name = s.name || s.fullPath;
-    names.push(name);
-    for (const pt of s.data || []) {
-      const ts = pt.timestamp || pt.x;
-      if (!merged[ts]) merged[ts] = { time: ts };
-      merged[ts][name] = pt.value ?? pt.y;
-    }
-  }
-  return {
-    rows: Object.values(merged).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime()),
-    names,
-  };
-}
-
-function formatTime(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return ts;
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 
 export default function DashboardBuilder({ onOpenChatPrompt }) {
   const [prompt, setPrompt] = useState(EXAMPLES[0]);
@@ -179,13 +162,19 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
     }
   };
 
-  const trend = buildChartData(data?.trends?.series || []);
+  const trend = useMemo(() => {
+    if (!data?.trends?.series) return { mergedData: [], seriesNames: [] };
+    return mergeSeriesData(data.trends.series);
+  }, [data]);
 
   return (
     <div className="h-full overflow-y-auto p-4 bg-gray-50">
       <div className="max-w-6xl mx-auto space-y-4">
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Dashboard Builder</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+            <LayoutDashboard size={22} className="text-blue-600" />
+            Dashboard Builder
+          </h2>
           <p className="text-sm text-gray-500 mb-4">
             Describe the industrial view you want. The system maps your request to tags, pulls live values and history, then builds a practical dashboard.
           </p>
@@ -220,20 +209,13 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
                 <option value="-6h">Last 6 hours</option>
                 <option value="-24h">Last 24 hours</option>
               </select>
-              <button
-                onClick={() => run()}
-                disabled={loading || !prompt.trim()}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 rounded-lg text-white text-sm font-medium"
-              >
-                {loading ? 'Generating...' : 'Generate Dashboard'}
-              </button>
+              <Button variant="primary" size="md" onClick={() => run()} disabled={loading || !prompt.trim()}>
+                {loading ? <><LoadingSpinner size={14} /> Generating...</> : <><Play size={14} /> Generate Dashboard</>}
+              </Button>
               {onOpenChatPrompt && (
-                <button
-                  onClick={() => onOpenChatPrompt(`Create an operational summary for this dashboard request:\n${prompt}`)}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-800 rounded-lg text-white text-sm font-medium"
-                >
-                  Explain in AI Chat
-                </button>
+                <Button variant="secondary" size="md" onClick={() => onOpenChatPrompt(`Create an operational summary for this dashboard request:\n${prompt}`)}>
+                  <MessageSquare size={14} /> Explain in AI Chat
+                </Button>
               )}
             </div>
 
@@ -246,13 +228,9 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
                   placeholder="New preset name"
                   className="bg-white border border-gray-200 rounded px-3 py-2 text-sm text-gray-700 min-w-[180px]"
                 />
-                <button
-                  onClick={savePreset}
-                  disabled={presetLoading || !prompt.trim()}
-                  className="px-3 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-200 disabled:text-gray-400 rounded text-white text-sm"
-                >
-                  Save
-                </button>
+                <Button variant="success" size="sm" onClick={savePreset} disabled={presetLoading || !prompt.trim()}>
+                  <Save size={14} /> Save
+                </Button>
                 <select
                   value={presetId}
                   onChange={(e) => setPresetId(e.target.value)}
@@ -263,27 +241,15 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
                     <option key={p.id} value={p.id}>{p.name}</option>
                   ))}
                 </select>
-                <button
-                  onClick={loadPreset}
-                  disabled={presetLoading || !selectedPreset}
-                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-200 disabled:text-gray-400 rounded text-white text-sm"
-                >
-                  Load
-                </button>
-                <button
-                  onClick={overwritePreset}
-                  disabled={presetLoading || !selectedPreset}
-                  className="px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-gray-200 disabled:text-gray-400 rounded text-white text-sm"
-                >
-                  Overwrite
-                </button>
-                <button
-                  onClick={removePreset}
-                  disabled={presetLoading || !selectedPreset}
-                  className="px-3 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-200 disabled:text-gray-400 rounded text-white text-sm"
-                >
-                  Delete
-                </button>
+                <Button variant="primary" size="sm" onClick={loadPreset} disabled={presetLoading || !selectedPreset}>
+                  <FolderOpen size={14} /> Load
+                </Button>
+                <Button variant="outline" size="sm" onClick={overwritePreset} disabled={presetLoading || !selectedPreset}>
+                  <RefreshCw size={14} /> Overwrite
+                </Button>
+                <Button variant="danger" size="sm" onClick={removePreset} disabled={presetLoading || !selectedPreset}>
+                  <Trash2 size={14} /> Delete
+                </Button>
               </div>
               {presetError && <div className="text-xs text-red-600 mt-2">{presetError}</div>}
             </div>
@@ -302,7 +268,10 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
 
             {data.assetHealth && (
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Asset Health</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
+                  <HeartPulse size={18} className="text-blue-600" />
+                  Asset Health
+                </h3>
                 <div className="flex items-center gap-4">
                   <div className={`text-3xl font-bold ${
                     data.assetHealth.status === 'healthy' ? 'text-green-600' :
@@ -323,18 +292,21 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
               </div>
             )}
 
-            {trend.rows.length > 0 && (
+            {trend.mergedData.length > 0 && (
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3">Trend View</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <ChartIcon size={18} className="text-blue-600" />
+                  Trend View
+                </h3>
                 <ResponsiveContainer width="100%" height={360}>
-                  <LineChart data={trend.rows}>
+                  <LineChart data={trend.mergedData}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="time" tickFormatter={formatTime} stroke="#9ca3af" tick={{ fontSize: 11 }} />
                     <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} />
                     <Tooltip labelFormatter={formatTime} />
-                    {trend.names.length > 1 && <Legend />}
-                    {trend.names.map((name, i) => (
-                      <Line key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+                    {trend.seriesNames.length > 1 && <Legend />}
+                    {trend.seriesNames.map((name, i) => (
+                      <Line key={name} type="monotone" dataKey={name} stroke={getColor(i)} strokeWidth={2} dot={false} />
                     ))}
                   </LineChart>
                 </ResponsiveContainer>
@@ -343,7 +315,10 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
 
             {(data.widgets || []).length > 0 && (
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3">Live KPI Cards</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Gauge size={18} className="text-blue-600" />
+                  Live KPI Cards
+                </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {data.widgets.filter(w => w.type === 'kpi').slice(0, 8).map((w) => (
                     <div key={w.id} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
@@ -358,7 +333,10 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
 
             {data.alarmSummary && (
               <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3">Alarm Summary (Last 8h)</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <Bell size={18} className="text-amber-600" />
+                  Alarm Summary (Last 8h)
+                </h3>
                 <div className="text-sm text-gray-700">
                   Active: {data.alarmSummary.activeCount} | Journal Events: {data.alarmSummary.journalCount}
                 </div>

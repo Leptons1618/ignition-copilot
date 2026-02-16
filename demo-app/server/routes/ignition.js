@@ -12,9 +12,9 @@ router.get('/status', async (req, res) => {
   try {
     const connected = await ignition.testConnection();
     const info = connected ? await ignition.getSystemInfo().catch(() => null) : null;
-    res.json({ connected, info });
+    res.json({ connected, info, demoMode: ignition.isDemoMode() });
   } catch (err) {
-    res.json({ connected: false, error: err.message });
+    res.json({ connected: false, error: err.message, demoMode: ignition.isDemoMode() });
   }
 });
 

@@ -1,13 +1,73 @@
 const API = '/api';
 
-export async function sendChat(messages, sessionId = 'default') {
+export async function sendChat(messages, sessionId = 'default', options = {}) {
   const res = await fetch(`${API}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, sessionId }),
+    body: JSON.stringify({ messages, sessionId, options }),
   });
   if (!res.ok) throw new Error(`Chat error: ${res.status}`);
   return res.json();
+}
+
+/**
+ * Stream chat via SSE. Calls onEvent({ type, data }) for each event.
+ * Returns an abort function.
+ * Event types: 'token', 'tool_start', 'tool_result', 'done', 'error'
+ */
+export function streamChat(messages, sessionId = 'default', options = {}, onEvent) {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const res = await fetch(`${API}/chat/stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages, sessionId, options }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        onEvent({ type: 'error', data: { message: `HTTP ${res.status}` } });
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventType = '';
+          let eventData = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7);
+            else if (line.startsWith('data: ')) eventData = line.slice(6);
+          }
+          if (eventType && eventData) {
+            try {
+              onEvent({ type: eventType, data: JSON.parse(eventData) });
+            } catch {
+              onEvent({ type: eventType, data: eventData });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        onEvent({ type: 'error', data: { message: err.message } });
+      }
+    }
+  })();
+
+  return () => controller.abort();
 }
 
 export async function getIgnitionStatus() {
@@ -78,6 +138,25 @@ export async function getChatModels() {
   return res.json();
 }
 
+export async function getChatModelsByUrl(url) {
+  const res = await fetch(`${API}/chat/models?url=${encodeURIComponent(url)}`);
+  return res.json();
+}
+
+export async function getChatConfig() {
+  const res = await fetch(`${API}/chat/config`);
+  return res.json();
+}
+
+export async function setChatConfig(config) {
+  const res = await fetch(`${API}/chat/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return res.json();
+}
+
 export async function getRAGStats() {
   const res = await fetch(`${API}/rag/stats`);
   return res.json();
@@ -138,5 +217,24 @@ export async function deleteDashboardPreset(id) {
 export async function loadDashboardPreset(id) {
   const res = await fetch(`${API}/dashboard/presets/${encodeURIComponent(id)}/load`, { method: 'POST' });
   if (!res.ok) throw new Error(`Preset load error: ${res.status}`);
+  return res.json();
+}
+
+export async function getServiceConfig() {
+  const res = await fetch(`${API}/config/services`);
+  return res.json();
+}
+
+export async function updateServiceConfig(config) {
+  const res = await fetch(`${API}/config/services`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config),
+  });
+  return res.json();
+}
+
+export async function testServiceConnections() {
+  const res = await fetch(`${API}/config/services/test`, { method: 'POST' });
   return res.json();
 }

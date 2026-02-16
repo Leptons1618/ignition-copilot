@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import {
+  PlaySquare, Play, RefreshCw, CheckCircle2, XCircle, Clock3, Wrench, ChevronDown,
+} from 'lucide-react';
 import { getScenarios, runScenario } from '../api.js';
+import Button from './ui/Button.jsx';
+import Badge from './ui/Badge.jsx';
+import Collapsible from './ui/Collapsible.jsx';
+import LoadingSpinner from './ui/LoadingSpinner.jsx';
+import EmptyState from './ui/EmptyState.jsx';
+import MarkdownRenderer from './chat/MarkdownRenderer.jsx';
+import ToolCallCard from './chat/ToolCallCard.jsx';
 
 export default function DemoScenarios() {
   const [scenarios, setScenarios] = useState([]);
@@ -52,8 +62,8 @@ export default function DemoScenarios() {
 
   if (loading) {
     return (
-      <div className="h-full flex items-center justify-center text-gray-500">
-        Loading scenarios...
+      <div className="h-full flex items-center justify-center">
+        <LoadingSpinner label="Loading scenarios..." />
       </div>
     );
   }
@@ -62,7 +72,10 @@ export default function DemoScenarios() {
     <div className="h-full overflow-y-auto p-4 bg-gray-50">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Demo Scenarios</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+            <PlaySquare size={22} className="text-blue-600" />
+            Demo Scenarios
+          </h2>
           <p className="text-gray-500">
             Run repeatable business-value scenarios against your configured services.
           </p>
@@ -99,13 +112,13 @@ export default function DemoScenarios() {
                 <button
                   onClick={() => run(scenario)}
                   disabled={isRunning || running !== null}
-                  className={`w-full py-2 rounded-lg font-medium text-sm transition-colors ${
+                  className={`w-full py-2 rounded-lg font-medium text-sm transition-colors inline-flex items-center justify-center gap-1.5 ${
                     isRunning ? 'bg-blue-600 text-white cursor-wait'
                     : result?.status === 'success' ? 'bg-green-600 hover:bg-green-700 text-white'
                     : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'
                   }`}
                 >
-                  {isRunning ? 'Running...' : result ? 'Re-run' : 'Run Scenario'}
+                  {isRunning ? <><LoadingSpinner size={14} /> Running...</> : result ? <><RefreshCw size={14} /> Re-run</> : <><Play size={14} /> Run Scenario</>}
                 </button>
               </div>
             );
@@ -122,39 +135,35 @@ export default function DemoScenarios() {
                 result.status === 'success' ? 'bg-green-50 border-b border-green-100'
                 : 'bg-red-50 border-b border-red-100'
               }`}>
+                {result.status === 'success'
+                  ? <CheckCircle2 size={16} className="text-green-600" />
+                  : <XCircle size={16} className="text-red-600" />}
                 <span className="text-gray-900 font-medium">{scenario.title || scenario.name || id}</span>
-                <span className={`ml-auto text-xs px-2 py-1 rounded-full font-medium ${
-                  result.status === 'success' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                }`}>
-                  {result.status === 'success' ? 'Complete' : 'Failed'}
+                <span className="ml-auto">
+                  {result.status === 'success' ? <Badge color="success">Complete</Badge> : <Badge color="error">Failed</Badge>}
                 </span>
                 {result.duration && (
-                  <span className="text-xs text-gray-400">{(result.duration / 1000).toFixed(1)}s</span>
+                  <span className="text-xs text-gray-400 inline-flex items-center gap-1">
+                    <Clock3 size={12} />
+                    {(result.duration / 1000).toFixed(1)}s
+                  </span>
                 )}
               </div>
 
               <div className="p-5">
                 {result.content && (
-                  <div className="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed">
-                    {result.content}
-                  </div>
+                  <MarkdownRenderer text={result.content} />
                 )}
 
                 {result.toolCalls && result.toolCalls.length > 0 && (
-                  <div className="mt-4">
-                    <div className="text-xs text-gray-500 mb-2">Tool Calls ({result.toolCalls.length})</div>
-                    <div className="space-y-1">
-                      {result.toolCalls.map((tc, i) => (
-                        <details key={i} className="group">
-                          <summary className="text-xs text-gray-400 cursor-pointer hover:text-gray-600 px-2 py-1 bg-gray-50 rounded border border-gray-100">
-                            Tool: {tc.tool}({JSON.stringify(tc.args).slice(0, 80)})
-                          </summary>
-                          <pre className="mt-1 p-2 bg-gray-50 rounded border border-gray-100 text-xs text-gray-600 overflow-x-auto max-h-40 overflow-y-auto">
-                            {JSON.stringify(tc.result, null, 2)}
-                          </pre>
-                        </details>
-                      ))}
+                  <div className="mt-4 space-y-1">
+                    <div className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                      <Wrench size={12} />
+                      Tool Calls ({result.toolCalls.length})
                     </div>
+                    {result.toolCalls.map((tc, i) => (
+                      <ToolCallCard key={i} toolCall={{ ...tc, status: tc.result?.error ? 'error' : 'success' }} />
+                    ))}
                   </div>
                 )}
 
@@ -164,7 +173,7 @@ export default function DemoScenarios() {
                     <div className="space-y-1">
                       {result.steps.map((step, i) => (
                         <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
-                          <span className="text-green-600">OK</span>
+                          <CheckCircle2 size={12} className="text-green-600" />
                           <span>{step}</span>
                         </div>
                       ))}

@@ -3,18 +3,57 @@
  */
 
 import { Router } from 'express';
-import { chat, listModels, TOOLS } from '../services/ollama.js';
+import { chat, chatStream, listModels, TOOLS, getChatConfig, updateChatConfig } from '../services/ollama.js';
 
 const router = Router();
 
-router.post('/', async (req, res) => {
+/* SSE streaming chat endpoint */
+router.post('/stream', async (req, res) => {
   try {
-    const { messages, sessionId = 'default' } = req.body;
+    const { messages, sessionId = 'default', options = {} } = req.body;
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'messages array required' });
     }
 
-    const result = await chat(messages, { sessionId });
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    let closed = false;
+    req.on('close', () => { closed = true; });
+
+    for await (const event of chatStream(messages, { sessionId, ...options })) {
+      if (closed) break;
+      send(event.type, event.data);
+    }
+
+    if (!closed) res.end();
+  } catch (err) {
+    console.error('Stream error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    } else {
+      res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
+      res.end();
+    }
+  }
+});
+
+router.post('/', async (req, res) => {
+  try {
+    const { messages, sessionId = 'default', options = {} } = req.body;
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'messages array required' });
+    }
+
+    const result = await chat(messages, { sessionId, ...options });
 
     let chartData = null;
     for (const tc of result.toolCalls || []) {
@@ -28,6 +67,7 @@ router.post('/', async (req, res) => {
       toolCalls: result.toolCalls,
       chartData,
       model: result.model,
+      perf: result.perf,
     });
   } catch (err) {
     console.error('Chat error:', err.message);
@@ -41,10 +81,23 @@ router.get('/tools', (req, res) => {
 
 router.get('/models', async (req, res) => {
   try {
-    const models = await listModels();
+    const models = await listModels(req.query.url || null);
     res.json({ models: models.map(m => ({ name: m.name, size: m.size, family: m.details?.family })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/config', (req, res) => {
+  res.json(getChatConfig());
+});
+
+router.post('/config', (req, res) => {
+  try {
+    const next = updateChatConfig(req.body || {});
+    res.json(next);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
   }
 });
 

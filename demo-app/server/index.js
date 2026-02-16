@@ -14,6 +14,7 @@ import chartRoutes from './routes/charts.js';
 import scenarioRoutes from './routes/scenarios.js';
 import dashboardRoutes from './routes/dashboard.js';
 import insightsRoutes from './routes/insights.js';
+import configRoutes from './routes/config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -32,6 +33,7 @@ app.use('/api/charts', chartRoutes);
 app.use('/api/scenarios', scenarioRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/insights', insightsRoutes);
+app.use('/api/config', configRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
