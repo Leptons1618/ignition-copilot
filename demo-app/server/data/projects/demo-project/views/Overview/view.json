@@ -1,0 +1,125 @@
+{
+  "root": {
+    "type": "ia.container.flex",
+    "props": {
+      "direction": "column",
+      "style": {
+        "gap": "16px",
+        "padding": "16px"
+      }
+    },
+    "children": [
+      {
+        "type": "ia.container.flex",
+        "props": {
+          "direction": "row",
+          "justify": "space-between",
+          "wrap": "wrap",
+          "style": {
+            "gap": "12px"
+          }
+        },
+        "meta": {
+          "name": "kpi-row"
+        },
+        "children": [
+          {
+            "type": "ia.display.label",
+            "props": {
+              "text": "KPI 1",
+              "style": {
+                "flex": "1 1 200px",
+                "padding": "16px",
+                "backgroundColor": "#ffffff",
+                "borderRadius": "8px",
+                "boxShadow": "0 1px 3px rgba(0,0,0,0.1)",
+                "fontSize": "24px",
+                "fontWeight": "bold",
+                "textAlign": "center"
+              }
+            },
+            "meta": {
+              "name": "kpi-1"
+            }
+          },
+          {
+            "type": "ia.display.label",
+            "props": {
+              "text": "KPI 2",
+              "style": {
+                "flex": "1 1 200px",
+                "padding": "16px",
+                "backgroundColor": "#ffffff",
+                "borderRadius": "8px",
+                "boxShadow": "0 1px 3px rgba(0,0,0,0.1)",
+                "fontSize": "24px",
+                "fontWeight": "bold",
+                "textAlign": "center"
+              }
+            },
+            "meta": {
+              "name": "kpi-2"
+            }
+          },
+          {
+            "type": "ia.display.label",
+            "props": {
+              "text": "KPI 3",
+              "style": {
+                "flex": "1 1 200px",
+                "padding": "16px",
+                "backgroundColor": "#ffffff",
+                "borderRadius": "8px",
+                "boxShadow": "0 1px 3px rgba(0,0,0,0.1)",
+                "fontSize": "24px",
+                "fontWeight": "bold",
+                "textAlign": "center"
+              }
+            },
+            "meta": {
+              "name": "kpi-3"
+            }
+          },
+          {
+            "type": "ia.display.label",
+            "props": {
+              "text": "KPI 4",
+              "style": {
+                "flex": "1 1 200px",
+                "padding": "16px",
+                "backgroundColor": "#ffffff",
+                "borderRadius": "8px",
+                "boxShadow": "0 1px 3px rgba(0,0,0,0.1)",
+                "fontSize": "24px",
+                "fontWeight": "bold",
+                "textAlign": "center"
+              }
+            },
+            "meta": {
+              "name": "kpi-4"
+            }
+          }
+        ]
+      },
+      {
+        "type": "ia.chart.easy-chart",
+        "props": {
+          "style": {
+            "height": "300px",
+            "backgroundColor": "#ffffff",
+            "borderRadius": "8px",
+            "padding": "12px"
+          }
+        },
+        "meta": {
+          "name": "trend-chart"
+        }
+      }
+    ],
+    "meta": {
+      "name": "root"
+    }
+  },
+  "params": {},
+  "custom": {}
+}

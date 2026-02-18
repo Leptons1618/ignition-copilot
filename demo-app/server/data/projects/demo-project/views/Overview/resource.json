@@ -1,0 +1,15 @@
+{
+  "scope": "G",
+  "version": 1,
+  "restricted": false,
+  "overridable": true,
+  "files": [
+    "view.json"
+  ],
+  "attributes": {
+    "lastModification": {
+      "actor": "ai-copilot",
+      "timestamp": "2026-02-18T20:19:19.729Z"
+    }
+  }
+}

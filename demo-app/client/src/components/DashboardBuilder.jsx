@@ -168,14 +168,14 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
   }, [data]);
 
   return (
-    <div className="h-full overflow-y-auto p-4 bg-gray-50">
+    <div className="h-full overflow-y-auto p-4 t-bg">
       <div className="max-w-6xl mx-auto space-y-4">
-        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-            <LayoutDashboard size={22} className="text-blue-600" />
+        <div className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+          <h2 className="text-2xl font-bold t-text mb-2 flex items-center gap-2">
+            <LayoutDashboard size={22} className="t-accent" />
             Dashboard Builder
           </h2>
-          <p className="text-sm text-gray-500 mb-4">
+          <p className="text-sm t-text-m mb-4">
             Describe the industrial view you want. The system maps your request to tags, pulls live values and history, then builds a practical dashboard.
           </p>
 
@@ -184,14 +184,14 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
               value={prompt}
               onChange={e => setPrompt(e.target.value)}
               rows={3}
-              className="w-full bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full t-field-bg border t-field-border rounded-lg px-3 py-2 text-sm t-field-fg focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)]"
             />
             <div className="flex gap-2 flex-wrap">
               {EXAMPLES.map((ex, i) => (
                 <button
                   key={i}
                   onClick={() => setPrompt(ex)}
-                  className="px-2 py-1 text-xs bg-white border border-gray-200 rounded hover:bg-gray-50 text-gray-700"
+                  className="px-2 py-1 text-xs t-surface border t-border-s rounded hover:t-surface-h t-text-2 cursor-pointer"
                 >
                   Example {i + 1}
                 </button>
@@ -202,7 +202,7 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
               <select
                 value={timeRange}
                 onChange={e => setTimeRange(e.target.value)}
-                className="bg-white border border-gray-200 rounded px-3 py-2 text-sm text-gray-700"
+                className="t-field-bg border t-field-border rounded px-3 py-2 text-sm t-field-fg cursor-pointer"
               >
                 <option value="-30m">Last 30 min</option>
                 <option value="-1h">Last 1 hour</option>
@@ -219,14 +219,14 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
               )}
             </div>
 
-            <div className="border-t border-gray-200 pt-3">
-              <div className="text-sm font-semibold text-gray-900 mb-2">Dashboard Presets</div>
+            <div className="border-t border-[var(--color-border)] pt-3">
+              <div className="text-sm font-semibold t-text mb-2">Dashboard Presets</div>
               <div className="flex gap-2 items-center flex-wrap">
                 <input
                   value={presetName}
                   onChange={(e) => setPresetName(e.target.value)}
                   placeholder="New preset name"
-                  className="bg-white border border-gray-200 rounded px-3 py-2 text-sm text-gray-700 min-w-[180px]"
+                  className="t-field-bg border t-field-border rounded px-3 py-2 text-sm t-field-fg min-w-[180px]"
                 />
                 <Button variant="success" size="sm" onClick={savePreset} disabled={presetLoading || !prompt.trim()}>
                   <Save size={14} /> Save
@@ -234,7 +234,7 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
                 <select
                   value={presetId}
                   onChange={(e) => setPresetId(e.target.value)}
-                  className="bg-white border border-gray-200 rounded px-3 py-2 text-sm text-gray-700 min-w-[220px]"
+                  className="t-field-bg border t-field-border rounded px-3 py-2 text-sm t-field-fg min-w-[220px] cursor-pointer"
                 >
                   <option value="">Select preset...</option>
                   {presets.map((p) => (
@@ -251,10 +251,10 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
                   <Trash2 size={14} /> Delete
                 </Button>
               </div>
-              {presetError && <div className="text-xs text-red-600 mt-2">{presetError}</div>}
+              {presetError && <div className="text-xs t-err mt-2">{presetError}</div>}
             </div>
 
-            {error && <div className="text-sm text-red-600">{error}</div>}
+            {error && <div className="text-sm t-err">{error}</div>}
           </div>
         </div>
 
@@ -267,25 +267,25 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
             </div>
 
             {data.assetHealth && (
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-2 flex items-center gap-2">
-                  <HeartPulse size={18} className="text-blue-600" />
+              <div className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+                <h3 className="text-lg font-semibold t-text mb-2 flex items-center gap-2">
+                  <HeartPulse size={18} className="t-accent" />
                   Asset Health
                 </h3>
                 <div className="flex items-center gap-4">
                   <div className={`text-3xl font-bold ${
-                    data.assetHealth.status === 'healthy' ? 'text-green-600' :
-                    data.assetHealth.status === 'warning' ? 'text-amber-600' : 'text-red-600'
+                    data.assetHealth.status === 'healthy' ? 't-ok' :
+                    data.assetHealth.status === 'warning' ? 't-warn' : 't-err'
                   }`}>
                     {data.assetHealth.score}
                   </div>
-                  <div className="text-sm text-gray-600">
+                  <div className="text-sm t-text-2">
                     <div>Status: <span className="font-semibold">{data.assetHealth.status}</span></div>
                     <div>Asset: <span className="font-mono text-xs">{data.assetHealth.assetPath}</span></div>
                   </div>
                 </div>
                 {(data.assetHealth.findings || []).length > 0 && (
-                  <div className="mt-3 space-y-1 text-sm text-gray-700">
+                  <div className="mt-3 space-y-1 text-sm t-text-2">
                     {data.assetHealth.findings.slice(0, 5).map((f, i) => <div key={i}>- {f}</div>)}
                   </div>
                 )}
@@ -293,9 +293,9 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
             )}
 
             {trend.mergedData.length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                  <ChartIcon size={18} className="text-blue-600" />
+              <div className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+                <h3 className="text-lg font-semibold t-text mb-3 flex items-center gap-2">
+                  <ChartIcon size={18} className="t-accent" />
                   Trend View
                 </h3>
                 <ResponsiveContainer width="100%" height={360}>
@@ -314,17 +314,17 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
             )}
 
             {(data.widgets || []).length > 0 && (
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                  <Gauge size={18} className="text-blue-600" />
+              <div className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+                <h3 className="text-lg font-semibold t-text mb-3 flex items-center gap-2">
+                  <Gauge size={18} className="t-accent" />
                   Live KPI Cards
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {data.widgets.filter(w => w.type === 'kpi').slice(0, 8).map((w) => (
-                    <div key={w.id} className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                      <div className="text-xs text-gray-500 truncate">{w.title}</div>
-                      <div className="text-xl font-mono text-gray-900">{String(w.value)}</div>
-                      <div className={`text-xs ${String(w.quality) === 'Good' ? 'text-green-600' : 'text-amber-600'}`}>{w.quality}</div>
+                    <div key={w.id} className="t-bg-alt border t-border-s rounded-lg p-3">
+                      <div className="text-xs t-text-m truncate">{w.title}</div>
+                      <div className="text-xl font-mono t-text">{String(w.value)}</div>
+                      <div className={`text-xs ${String(w.quality) === 'Good' ? 't-ok' : 't-warn'}`}>{w.quality}</div>
                     </div>
                   ))}
                 </div>
@@ -332,17 +332,17 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
             )}
 
             {data.alarmSummary && (
-              <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                  <Bell size={18} className="text-amber-600" />
+              <div className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+                <h3 className="text-lg font-semibold t-text mb-3 flex items-center gap-2">
+                  <Bell size={18} className="t-warn" />
                   Alarm Summary (Last 8h)
                 </h3>
-                <div className="text-sm text-gray-700">
+                <div className="text-sm t-text-2">
                   Active: {data.alarmSummary.activeCount} | Journal Events: {data.alarmSummary.journalCount}
                 </div>
                 <div className="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                   {Object.entries(data.alarmSummary.byPriority || {}).map(([k, v]) => (
-                    <div key={k} className="bg-gray-50 border border-gray-200 rounded p-2">
+                    <div key={k} className="t-bg-alt border t-border-s rounded p-2">
                       {k}: {v}
                     </div>
                   ))}
@@ -358,9 +358,9 @@ export default function DashboardBuilder({ onOpenChatPrompt }) {
 
 function StatCard({ label, value }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
-      <div className="text-xs text-gray-500">{label}</div>
-      <div className="text-2xl font-semibold text-gray-900">{value}</div>
+    <div className="t-surface border t-border-s rounded-lg p-3 t-shadow">
+      <div className="text-xs t-text-m">{label}</div>
+      <div className="text-2xl font-semibold t-text">{value}</div>
     </div>
   );
 }

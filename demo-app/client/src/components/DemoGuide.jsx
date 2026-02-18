@@ -52,16 +52,16 @@ export default function DemoGuide({ onOpenChatPrompt, onOpenCharts, onOpenScenar
   }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 bg-gray-50">
+    <div className="h-full overflow-y-auto p-4 t-bg">
       <div className="max-w-6xl mx-auto space-y-6">
-        <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+        <section className="t-surface border t-border-s rounded-xl p-5 t-shadow">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                <Compass size={22} className="text-blue-600" />
+              <h2 className="text-2xl font-bold t-text flex items-center gap-2">
+                <Compass size={22} className="t-accent" />
                 Demo Readiness
               </h2>
-              <p className="text-sm text-gray-500">Pre-flight checks and practical workflows for a live demonstration.</p>
+              <p className="text-sm t-text-m">Pre-flight checks and practical workflows for a live demonstration.</p>
             </div>
             <Button variant="outline" size="sm" onClick={refresh} disabled={status.loading}>
               {status.loading ? <LoadingSpinner size={14} /> : <RefreshCw size={14} />}
@@ -88,21 +88,21 @@ export default function DemoGuide({ onOpenChatPrompt, onOpenCharts, onOpenScenar
           </div>
         </section>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <BookOpen size={18} className="text-blue-600" />
+        <section className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+          <h3 className="text-lg font-semibold t-text mb-3 flex items-center gap-2">
+            <BookOpen size={18} className="t-accent" />
             Practical Usage Workflows
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {PRACTICAL_WORKFLOWS.map((item) => {
               const Icon = item.icon;
               return (
-                <div key={item.title} className="border border-gray-200 rounded-lg p-4 bg-gray-50 hover:border-gray-300 transition-colors">
-                  <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                    <Icon size={15} className="text-blue-600" />
+                <div key={item.title} className="border t-border-s rounded-lg p-4 t-bg hover:t-border transition-colors">
+                  <div className="text-sm font-semibold t-text flex items-center gap-1.5">
+                    <Icon size={15} className="t-accent" />
                     {item.title}
                   </div>
-                  <div className="text-xs text-gray-500 mt-1 mb-3">{item.value}</div>
+                  <div className="text-xs t-text-m mt-1 mb-3">{item.value}</div>
                   <Button variant="primary" size="sm" className="w-full" onClick={() => onOpenChatPrompt(item.prompt)}>
                     <MessageSquare size={14} /> Open in Chat
                   </Button>
@@ -112,12 +112,12 @@ export default function DemoGuide({ onOpenChatPrompt, onOpenCharts, onOpenScenar
           </div>
         </section>
 
-        <section className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <PlaySquare size={18} className="text-blue-600" />
+        <section className="t-surface border t-border-s rounded-xl p-5 t-shadow">
+          <h3 className="text-lg font-semibold t-text mb-3 flex items-center gap-2">
+            <PlaySquare size={18} className="t-accent" />
             Suggested Demo Flow (5-8 min)
           </h3>
-          <div className="space-y-2 text-sm text-gray-700">
+          <div className="space-y-2 text-sm t-text-2">
             <Step num="1" line="Show System tab for connectivity and available tools." />
             <Step num="2" line="Run a practical workflow prompt in AI Chat (Fault Detection)." />
             <Step num="3" line="Open Charts tab and trend MotorM12 tags for visual proof." />
@@ -151,12 +151,12 @@ export default function DemoGuide({ onOpenChatPrompt, onOpenCharts, onOpenScenar
 
 function CheckCard({ label, ok, detail }) {
   return (
-    <div className={`rounded-lg border p-3 ${ok ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-      <div className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
-        {ok ? <CheckCircle2 size={14} className="text-green-600" /> : <XCircle size={14} className="text-red-600" />}
+    <div className={`rounded-lg border p-3 ${ok ? 't-ok-border t-ok-soft' : 't-err-border t-err-soft'}`}>
+      <div className="text-sm font-medium t-text flex items-center gap-1.5">
+        {ok ? <CheckCircle2 size={14} className="t-ok" /> : <XCircle size={14} className="t-err" />}
         {label}
       </div>
-      <div className={`text-xs mt-1 ${ok ? 'text-green-700' : 'text-red-700'}`}>{detail}</div>
+      <div className={`text-xs mt-1 ${ok ? 't-ok' : 't-err'}`}>{detail}</div>
     </div>
   );
 }
@@ -164,7 +164,7 @@ function CheckCard({ label, ok, detail }) {
 function Step({ num, line }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs bg-blue-100 text-blue-700 font-semibold shrink-0">
+      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full text-xs t-accent-soft t-accent font-semibold shrink-0">
         {num}
       </span>
       <span>{line}</span>

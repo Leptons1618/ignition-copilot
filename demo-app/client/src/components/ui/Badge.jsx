@@ -1,11 +1,11 @@
 import React from 'react';
 
 const colors = {
-  success: 'bg-green-50 text-green-700 border-green-200',
-  warning: 'bg-amber-50 text-amber-700 border-amber-200',
-  error: 'bg-red-50 text-red-700 border-red-200',
-  info: 'bg-blue-50 text-blue-700 border-blue-200',
-  neutral: 'bg-gray-100 text-gray-700 border-gray-200',
+  success: 't-ok-soft t-ok t-ok-border',
+  warning: 't-warn-soft t-warn t-warn-border',
+  error: 't-err-soft t-err t-err-border',
+  info: 't-info-soft t-info t-info-border',
+  neutral: 't-bg-alt t-text-2 t-border-s',
 };
 
 export default function Badge({ color = 'neutral', children, className = '' }) {

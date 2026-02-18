@@ -11,16 +11,16 @@ export default function ChartBlock({ data, onExpand }) {
   if (!data?.series?.length) return null;
 
   const { mergedData, seriesNames } = mergeSeriesData(data.series);
-  if (mergedData.length === 0) return <p className="text-gray-500 text-sm">No data to chart</p>;
+  if (mergedData.length === 0) return <p className="t-text-m text-sm">No data to chart</p>;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm my-2">
+    <div className="t-surface border t-border-s rounded-lg p-3 t-shadow my-2">
       <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-gray-500">{seriesNames.join(', ')}</span>
+        <span className="text-xs t-text-m">{seriesNames.join(', ')}</span>
         {onExpand && (
           <button
             onClick={() => onExpand(data.series.map(s => s.fullPath || s.name), '-1h')}
-            className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+            className="inline-flex items-center gap-1 text-xs t-accent hover:opacity-80 cursor-pointer"
           >
             <Maximize2 size={12} />
             Expand

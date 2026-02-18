@@ -89,14 +89,14 @@ export default function DynamicChart({ chartRequest, workspaceTags = [], onAddWo
   const ChartComponent = chartType === 'bar' ? BarChart : chartType === 'area' ? AreaChart : LineChart;
 
   return (
-    <div className="h-full flex flex-col p-4 overflow-y-auto bg-gray-50 gap-3">
-      <div className="bg-white border border-gray-200 rounded-lg p-3 space-y-3">
+    <div className="h-full flex flex-col p-4 overflow-y-auto t-bg gap-3">
+      <div className="t-surface border t-border-s rounded-lg p-3 space-y-3">
         <div className="flex gap-2">
-          <input value={tagPaths} onChange={e => setTagPaths(e.target.value)} placeholder="Comma-separated tag paths" className="flex-1 border border-gray-200 rounded px-3 py-2 text-sm" />
-          <button onClick={() => fetchChart()} disabled={loading || !tagPaths.trim()} className="px-4 py-2 rounded bg-blue-600 text-white text-sm disabled:bg-gray-200">
+          <input value={tagPaths} onChange={e => setTagPaths(e.target.value)} placeholder="Comma-separated tag paths" className="flex-1 border t-field-border rounded px-3 py-2 text-sm t-field-bg t-field-fg" />
+          <button onClick={() => fetchChart()} disabled={loading || !tagPaths.trim()} className="px-4 py-2 rounded t-accent-bg text-white text-sm disabled:opacity-40 cursor-pointer">
             {loading ? 'Loading' : 'Chart'}
           </button>
-          <button onClick={readLive} disabled={!tagPaths.trim()} className="inline-flex items-center gap-1 px-4 py-2 rounded bg-gray-800 text-white text-sm disabled:bg-gray-200">
+          <button onClick={readLive} disabled={!tagPaths.trim()} className="inline-flex items-center gap-1 px-4 py-2 rounded t-surface t-text text-sm disabled:opacity-40 cursor-pointer">
             <RefreshCw size={14} />
             Live
           </button>
@@ -104,13 +104,13 @@ export default function DynamicChart({ chartRequest, workspaceTags = [], onAddWo
 
         <div className="flex flex-wrap gap-2 items-center">
           {TIME_RANGES.map(r => (
-            <button key={r.value} onClick={() => setTimeRange(r.value)} className={`px-3 py-1 rounded text-sm border ${timeRange === r.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'}`}>
+            <button key={r.value} onClick={() => setTimeRange(r.value)} className={`px-3 py-1 rounded text-sm border cursor-pointer ${timeRange === r.value ? 't-accent-bg text-white t-accent-border' : 't-surface t-text-2 t-border-s'}`}>
               {r.label}
             </button>
           ))}
-          <div className="w-px h-6 bg-gray-200" />
+          <div className="w-px h-6 t-border-s" />
           {CHART_TYPES.map(ct => (
-            <button key={ct.value} onClick={() => setChartType(ct.value)} className={`px-3 py-1 rounded text-sm border ${chartType === ct.value ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'}`}>
+            <button key={ct.value} onClick={() => setChartType(ct.value)} className={`px-3 py-1 rounded text-sm border cursor-pointer ${chartType === ct.value ? 't-accent-bg text-white t-accent-border' : 't-surface t-text-2 t-border-s'}`}>
               {ct.label}
             </button>
           ))}
@@ -118,12 +118,12 @@ export default function DynamicChart({ chartRequest, workspaceTags = [], onAddWo
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0">
-        <section className="lg:col-span-2 bg-white border border-gray-200 rounded-lg p-4 min-h-[420px]">
-          {error && <div className="mb-3 px-3 py-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>}
+        <section className="lg:col-span-2 t-surface border t-border-s rounded-lg p-4 min-h-[420px]">
+          {error && <div className="mb-3 px-3 py-2 t-err-soft border t-err-border rounded t-err text-sm">{error}</div>}
           {mergedData.length > 0 ? (
             <>
               <div className="flex justify-between items-center mb-3">
-                <h3 className="text-gray-900 font-medium">{seriesNames.join(', ')}</h3>
+                <h3 className="t-text font-medium">{seriesNames.join(', ')}</h3>
                 <Badge color="neutral">{mergedData.length} points</Badge>
               </div>
               <ResponsiveContainer width="100%" height={360}>
@@ -146,39 +146,39 @@ export default function DynamicChart({ chartRequest, workspaceTags = [], onAddWo
           )}
         </section>
 
-        <aside className="bg-white border border-gray-200 rounded-lg p-3 overflow-y-auto">
-          <div className="text-sm font-semibold text-gray-900 mb-2">Tag Sources</div>
+        <aside className="t-surface border t-border-s rounded-lg p-3 overflow-y-auto">
+          <div className="text-sm font-semibold t-text mb-2">Tag Sources</div>
           <div className="space-y-2">
             <div>
-              <div className="text-xs text-gray-500 mb-1">Workspace Tags</div>
+              <div className="text-xs t-text-m mb-1">Workspace Tags</div>
               <div className="space-y-1 max-h-28 overflow-y-auto">
                 {workspaceTags.map(t => (
-                  <button key={t} onClick={() => addTagPath(t)} className="w-full text-left text-xs px-2 py-1 border border-gray-200 rounded bg-gray-50 hover:bg-gray-100 font-mono">
+                  <button key={t} onClick={() => addTagPath(t)} className="w-full text-left text-xs px-2 py-1 border t-border-s rounded t-bg-alt hover:t-surface-h font-mono cursor-pointer">
                     {t}
                   </button>
                 ))}
-                {workspaceTags.length === 0 && <div className="text-xs text-gray-400">No workspace tags.</div>}
+                {workspaceTags.length === 0 && <div className="text-xs t-text-m">No workspace tags.</div>}
               </div>
             </div>
-            <div className="pt-2 border-t border-gray-200">
-              <div className="text-xs text-gray-500 mb-1">Search Ignition Tags</div>
+            <div className="pt-2 border-t t-border-s">
+              <div className="text-xs t-text-m mb-1">Search Ignition Tags</div>
               <div className="flex gap-1">
                 <div className="relative flex-1">
-                  <Search size={13} className="absolute left-2 top-2 text-gray-400" />
-                  <input value={searchPattern} onChange={e => setSearchPattern(e.target.value)} className="w-full border border-gray-200 rounded pl-7 pr-2 py-1.5 text-xs" />
+                  <Search size={13} className="absolute left-2 top-2 t-text-m" />
+                  <input value={searchPattern} onChange={e => setSearchPattern(e.target.value)} className="w-full border t-field-border rounded pl-7 pr-2 py-1.5 text-xs t-field-bg t-field-fg" />
                 </div>
-                <button onClick={runSearch} className="px-2 py-1.5 bg-blue-600 text-white rounded text-xs">Find</button>
+                <button onClick={runSearch} className="px-2 py-1.5 t-accent-bg text-white rounded text-xs cursor-pointer">Find</button>
               </div>
               <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
                 {searchResults.map((t, i) => {
                   const fullPath = t.fullPath || t.path || t.name;
                   return (
-                    <div key={`${fullPath}-${i}`} className="flex items-center gap-1 border border-gray-200 rounded px-2 py-1 bg-gray-50">
-                      <span className="text-[10px] font-mono text-gray-700 flex-1 truncate">{fullPath}</span>
-                      <button onClick={() => addTagPath(fullPath)} className="text-gray-600 hover:text-blue-700">
+                    <div key={`${fullPath}-${i}`} className="flex items-center gap-1 border t-border-s rounded px-2 py-1 t-bg-alt">
+                      <span className="text-[10px] font-mono t-text-2 flex-1 truncate">{fullPath}</span>
+                      <button onClick={() => addTagPath(fullPath)} className="t-text-m hover:t-accent cursor-pointer">
                         <Plus size={12} />
                       </button>
-                      <button onClick={() => onAddWorkspaceTags?.([fullPath])} className="text-gray-600 hover:text-green-700" title="Add to workspace">
+                      <button onClick={() => onAddWorkspaceTags?.([fullPath])} className="t-text-m hover:t-ok cursor-pointer" title="Add to workspace">
                         <Plus size={12} />
                       </button>
                     </div>
@@ -189,14 +189,14 @@ export default function DynamicChart({ chartRequest, workspaceTags = [], onAddWo
           </div>
 
           {liveValues && (
-            <div className="mt-3 pt-3 border-t border-gray-200">
-              <div className="text-xs text-gray-500 mb-1">Live Snapshot</div>
+            <div className="mt-3 pt-3 border-t t-border-s">
+              <div className="text-xs t-text-m mb-1">Live Snapshot</div>
               <div className="space-y-1 max-h-48 overflow-y-auto">
                 {liveValues.map((v, i) => (
-                  <div key={i} className="text-xs border border-gray-200 rounded bg-gray-50 px-2 py-1">
-                    <div className="font-mono text-gray-700 truncate">{v.path}</div>
-                    <div className="text-gray-900">{typeof v.value === 'number' ? v.value.toFixed(2) : String(v.value)}</div>
-                    <div className={v.quality === 'Good' ? 'text-green-700' : 'text-amber-700'}>{v.quality}</div>
+                  <div key={i} className="text-xs border t-border-s rounded t-bg-alt px-2 py-1">
+                    <div className="font-mono t-text-2 truncate">{v.path}</div>
+                    <div className="t-text">{typeof v.value === 'number' ? v.value.toFixed(2) : String(v.value)}</div>
+                    <div className={v.quality === 'Good' ? 't-ok' : 't-warn'}>{v.quality}</div>
                   </div>
                 ))}
               </div>

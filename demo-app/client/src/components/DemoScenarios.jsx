@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  PlaySquare, Play, RefreshCw, CheckCircle2, XCircle, Clock3, Wrench, ChevronDown,
+  PlaySquare, Play, RefreshCw, CheckCircle2, XCircle, Clock3, Wrench, ChevronDown, Loader2,
 } from 'lucide-react';
 import { getScenarios, runScenario } from '../api.js';
 import Button from './ui/Button.jsx';
@@ -11,11 +11,20 @@ import EmptyState from './ui/EmptyState.jsx';
 import MarkdownRenderer from './chat/MarkdownRenderer.jsx';
 import ToolCallCard from './chat/ToolCallCard.jsx';
 
+const SCENARIO_STAGES = [
+  'Initializing scenario...',
+  'Connecting to Ignition Gateway...',
+  'Reading tag data...',
+  'Running AI analysis...',
+  'Processing results...',
+];
+
 export default function DemoScenarios() {
   const [scenarios, setScenarios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(null);
   const [results, setResults] = useState({});
+  const [progressStage, setProgressStage] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -33,11 +42,17 @@ export default function DemoScenarios() {
   const run = async (scenario) => {
     const id = scenario.id;
     setRunning(id);
+    setProgressStage(0);
     setResults(prev => ({ ...prev, [id]: { status: 'running', steps: [] } }));
+
+    const stageTimer = setInterval(() => {
+      setProgressStage(prev => Math.min(prev + 1, SCENARIO_STAGES.length - 1));
+    }, 2500);
 
     try {
       const startedAt = Date.now();
       const result = await runScenario(id);
+      clearInterval(stageTimer);
       const duration = result.duration ?? (Date.now() - startedAt);
       const newResult = {
         status: result.success === false || result.error ? 'error' : 'success',
@@ -49,6 +64,7 @@ export default function DemoScenarios() {
       };
       setResults(prev => ({ ...prev, [id]: newResult }));
     } catch (err) {
+      clearInterval(stageTimer);
       setResults(prev => ({ ...prev, [id]: { status: 'error', content: err.message } }));
     } finally {
       setRunning(null);
@@ -69,14 +85,14 @@ export default function DemoScenarios() {
   }
 
   return (
-    <div className="h-full overflow-y-auto p-4 bg-gray-50">
+    <div className="h-full overflow-y-auto p-4 t-bg">
       <div className="max-w-6xl mx-auto">
         <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
-            <PlaySquare size={22} className="text-blue-600" />
+          <h2 className="text-2xl font-bold t-text mb-2 flex items-center gap-2">
+            <PlaySquare size={22} className="t-accent" />
             Demo Scenarios
           </h2>
-          <p className="text-gray-500">
+          <p className="t-text-m">
             Run repeatable business-value scenarios against your configured services.
           </p>
         </div>
@@ -90,32 +106,32 @@ export default function DemoScenarios() {
             return (
               <div
                 key={scenario.id}
-                className={`bg-white border rounded-xl p-5 transition-all shadow-sm ${
-                  result?.status === 'success' ? 'border-green-300'
-                  : result?.status === 'error' ? 'border-red-300'
-                  : isRunning ? 'border-blue-300 animate-pulse'
-                  : 'border-gray-200 hover:border-gray-300 hover:shadow'
+                className={`t-surface border rounded-xl p-5 transition-all t-shadow ${
+                  result?.status === 'success' ? 't-ok-border'
+                  : result?.status === 'error' ? 't-err-border'
+                  : isRunning ? 't-accent-border animate-pulse'
+                  : 't-border-s hover:t-border hover:shadow'
                 }`}
               >
                 <div className="mb-3">
-                  <h3 className="text-gray-900 font-semibold">{title}</h3>
-                  <p className="text-gray-500 text-sm mt-1">{scenario.description}</p>
+                  <h3 className="t-text font-semibold">{title}</h3>
+                  <p className="t-text-m text-sm mt-1">{scenario.description}</p>
                 </div>
 
                 {scenario.businessValue && (
-                  <div className="mb-3 px-3 py-2 bg-blue-50 border border-blue-100 rounded-lg">
-                    <div className="text-xs text-blue-700 font-medium mb-1">Business Value</div>
-                    <div className="text-xs text-blue-600">{short(scenario.businessValue, 140)}</div>
+                  <div className="mb-3 px-3 py-2 t-accent-soft border t-accent-border rounded-lg">
+                    <div className="text-xs t-accent font-medium mb-1">Business Value</div>
+                    <div className="text-xs t-accent opacity-80">{short(scenario.businessValue, 140)}</div>
                   </div>
                 )}
 
                 <button
                   onClick={() => run(scenario)}
                   disabled={isRunning || running !== null}
-                  className={`w-full py-2 rounded-lg font-medium text-sm transition-colors inline-flex items-center justify-center gap-1.5 ${
-                    isRunning ? 'bg-blue-600 text-white cursor-wait'
-                    : result?.status === 'success' ? 'bg-green-600 hover:bg-green-700 text-white'
-                    : 'bg-gray-100 hover:bg-gray-200 text-gray-700 border border-gray-200'
+                  className={`w-full py-2 rounded-lg font-medium text-sm transition-colors inline-flex items-center justify-center gap-1.5 cursor-pointer ${
+                    isRunning ? 't-accent-bg text-white cursor-wait'
+                    : result?.status === 'success' ? 't-ok-fill hover:opacity-90 text-white'
+                    : 't-bg-alt hover:t-surface-h t-text-2 border t-border-s'
                   }`}
                 >
                   {isRunning ? <><LoadingSpinner size={14} /> Running...</> : result ? <><RefreshCw size={14} /> Re-run</> : <><Play size={14} /> Run Scenario</>}
@@ -130,20 +146,20 @@ export default function DemoScenarios() {
           if (!scenario) return null;
 
           return (
-            <div key={id} className="mb-6 bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+            <div key={id} className="mb-6 t-surface border t-border-s rounded-xl overflow-hidden t-shadow">
               <div className={`px-5 py-3 flex items-center gap-3 ${
-                result.status === 'success' ? 'bg-green-50 border-b border-green-100'
-                : 'bg-red-50 border-b border-red-100'
+                result.status === 'success' ? 't-ok-soft border-b t-ok-border'
+                : 't-err-soft border-b t-err-border'
               }`}>
                 {result.status === 'success'
-                  ? <CheckCircle2 size={16} className="text-green-600" />
-                  : <XCircle size={16} className="text-red-600" />}
-                <span className="text-gray-900 font-medium">{scenario.title || scenario.name || id}</span>
+                  ? <CheckCircle2 size={16} className="t-ok" />
+                  : <XCircle size={16} className="t-err" />}
+                <span className="t-text font-medium">{scenario.title || scenario.name || id}</span>
                 <span className="ml-auto">
                   {result.status === 'success' ? <Badge color="success">Complete</Badge> : <Badge color="error">Failed</Badge>}
                 </span>
                 {result.duration && (
-                  <span className="text-xs text-gray-400 inline-flex items-center gap-1">
+                  <span className="text-xs t-text-m inline-flex items-center gap-1">
                     <Clock3 size={12} />
                     {(result.duration / 1000).toFixed(1)}s
                   </span>
@@ -157,7 +173,7 @@ export default function DemoScenarios() {
 
                 {result.toolCalls && result.toolCalls.length > 0 && (
                   <div className="mt-4 space-y-1">
-                    <div className="text-xs text-gray-500 mb-2 flex items-center gap-1">
+                    <div className="text-xs t-text-m mb-2 flex items-center gap-1">
                       <Wrench size={12} />
                       Tool Calls ({result.toolCalls.length})
                     </div>
@@ -169,11 +185,11 @@ export default function DemoScenarios() {
 
                 {result.steps && result.steps.length > 0 && (
                   <div className="mt-4">
-                    <div className="text-xs text-gray-500 mb-2">Execution Steps</div>
+                    <div className="text-xs t-text-m mb-2">Execution Steps</div>
                     <div className="space-y-1">
                       {result.steps.map((step, i) => (
-                        <div key={i} className="flex items-center gap-2 text-xs text-gray-600">
-                          <CheckCircle2 size={12} className="text-green-600" />
+                        <div key={i} className="flex items-center gap-2 text-xs t-text-2">
+                          <CheckCircle2 size={12} className="t-ok" />
                           <span>{step}</span>
                         </div>
                       ))}
@@ -184,6 +200,48 @@ export default function DemoScenarios() {
             </div>
           );
         })}
+
+        {/* Scenario Progress Modal */}
+        {running !== null && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="t-surface rounded-xl t-shadow-lg border t-border-s max-w-md w-full p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <div className="w-10 h-10 rounded-full t-accent-bg flex items-center justify-center shrink-0">
+                  <PlaySquare size={20} className="text-white" />
+                </div>
+                <div>
+                  <h3 className="font-semibold t-text">
+                    {scenarios.find(s => s.id === running)?.title || running}
+                  </h3>
+                  <p className="text-xs t-text-m">Running scenario...</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {SCENARIO_STAGES.map((stage, i) => (
+                  <div key={i} className={`flex items-center gap-3 text-sm transition-all ${
+                    i < progressStage ? 't-ok' : i === progressStage ? 't-text' : 't-text-m opacity-40'
+                  }`}>
+                    {i < progressStage
+                      ? <CheckCircle2 size={16} className="shrink-0" />
+                      : i === progressStage
+                        ? <Loader2 size={16} className="animate-spin shrink-0 t-accent" />
+                        : <div className="w-4 h-4 rounded-full border-2 t-border shrink-0" />
+                    }
+                    <span>{stage}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 w-full t-bg-alt rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-full t-accent-bg rounded-full transition-all duration-700 ease-out"
+                  style={{ width: `${((progressStage + 1) / SCENARIO_STAGES.length) * 100}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

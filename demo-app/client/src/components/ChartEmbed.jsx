@@ -28,7 +28,7 @@ export default function ChartEmbed({ data }) {
     return new Date(a.time).getTime() - new Date(b.time).getTime();
   });
 
-  if (chartData.length === 0) return <p className="text-gray-500 text-sm">No data to chart</p>;
+  if (chartData.length === 0) return <p className="t-text-m text-sm">No data to chart</p>;
 
   // Format timestamp for display
   const formatTime = (ts) => {
@@ -41,7 +41,7 @@ export default function ChartEmbed({ data }) {
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+    <div className="t-surface border t-border-s rounded-lg p-3 t-shadow">
       <ResponsiveContainer width="100%" height={250}>
         <LineChart data={chartData}>
           <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />

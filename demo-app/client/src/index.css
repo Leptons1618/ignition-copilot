@@ -1,1 +1,160 @@
 @import "tailwindcss";
+
+/* ── Theme CSS Variables (set by ThemeProvider in JS) ── */
+:root {
+  --color-bg: #282a36;
+  --color-bg-secondary: #1e1f29;
+  --color-surface: #44475a;
+  --color-surface-hover: #4e5170;
+  --color-border: #6272a4;
+  --color-border-subtle: #383a4a;
+  --color-text: #f8f8f2;
+  --color-text-secondary: #bfc4d6;
+  --color-text-muted: #6272a4;
+  --color-accent: #bd93f9;
+  --color-accent-hover: #caa4ff;
+  --color-accent-subtle: rgba(189, 147, 249, 0.15);
+  --color-success: #50fa7b;
+  --color-success-subtle: rgba(80, 250, 123, 0.15);
+  --color-warning: #ffb86c;
+  --color-warning-subtle: rgba(255, 184, 108, 0.15);
+  --color-error: #ff5555;
+  --color-error-subtle: rgba(255, 85, 85, 0.15);
+  --color-info: #8be9fd;
+  --color-info-subtle: rgba(139, 233, 253, 0.15);
+  --color-header-bg: #21222c;
+  --color-sidebar-bg: #21222c;
+  --color-input-bg: #383a4a;
+  --color-input-border: #6272a4;
+  --color-input-text: #f8f8f2;
+  --color-shadow: rgba(0,0,0,0.4);
+  --color-scroll-thumb: #6272a4;
+  --color-scroll-thumb-hover: #bd93f9;
+}
+
+/* ── Base ── */
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ── Theme Utilities (Tailwind v4 @utility — supports hover:, focus:, etc.) ── */
+
+/* Backgrounds */
+@utility t-bg { background-color: var(--color-bg); }
+@utility t-bg-alt { background-color: var(--color-bg-secondary); }
+@utility t-surface { background-color: var(--color-surface); }
+@utility t-surface-h { background-color: var(--color-surface-hover); }
+@utility t-head-bg { background-color: var(--color-header-bg); }
+@utility t-nav-bg { background-color: var(--color-sidebar-bg); }
+@utility t-accent-bg { background-color: var(--color-accent); }
+@utility t-accent-soft { background-color: var(--color-accent-subtle); }
+@utility t-ok-soft { background-color: var(--color-success-subtle); }
+@utility t-ok-fill { background-color: var(--color-success); }
+@utility t-warn-soft { background-color: var(--color-warning-subtle); }
+@utility t-warn-fill { background-color: var(--color-warning); }
+@utility t-err-soft { background-color: var(--color-error-subtle); }
+@utility t-err-fill { background-color: var(--color-error); }
+@utility t-info-soft { background-color: var(--color-info-subtle); }
+@utility t-info-fill { background-color: var(--color-info); }
+@utility t-field-bg { background-color: var(--color-input-bg); }
+
+/* Text */
+@utility t-text { color: var(--color-text); }
+@utility t-text-2 { color: var(--color-text-secondary); }
+@utility t-text-m { color: var(--color-text-muted); }
+@utility t-accent { color: var(--color-accent); }
+@utility t-ok { color: var(--color-success); }
+@utility t-warn { color: var(--color-warning); }
+@utility t-err { color: var(--color-error); }
+@utility t-info { color: var(--color-info); }
+@utility t-field-fg { color: var(--color-input-text); }
+
+/* Borders */
+@utility t-border { border-color: var(--color-border); }
+@utility t-border-s { border-color: var(--color-border-subtle); }
+@utility t-accent-border { border-color: var(--color-accent); }
+@utility t-ok-border { border-color: var(--color-success); }
+@utility t-warn-border { border-color: var(--color-warning); }
+@utility t-err-border { border-color: var(--color-error); }
+@utility t-info-border { border-color: var(--color-info); }
+@utility t-field-border { border-color: var(--color-input-border); }
+
+/* Shadows */
+@utility t-shadow { box-shadow: 0 1px 3px var(--color-shadow); }
+@utility t-shadow-lg { box-shadow: 0 8px 30px var(--color-shadow); }
+
+/* ── Animations ── */
+@keyframes slide-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.animate-slide-in { animation: slide-in 0.25s ease-out; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in { animation: fade-in 0.15s ease-out; }
+
+@keyframes slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-slide-up { animation: slide-up 0.2s ease-out; }
+
+@keyframes float-in {
+  from { transform: scale(0.95) translateY(10px); opacity: 0; }
+  to { transform: scale(1) translateY(0); opacity: 1; }
+}
+.animate-float-in { animation: float-in 0.2s ease-out; }
+
+/* ── Scrollbar ── */
+.scrollbar-thin::-webkit-scrollbar { width: 6px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--color-scroll-thumb);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scroll-thumb-hover);
+}
+
+/* Global scrollbar theming */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-scroll-thumb);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scroll-thumb-hover);
+}
+
+/* ── Focus ring ── */
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ── Selection ── */
+::selection {
+  background: var(--color-accent-subtle);
+  color: var(--color-text);
+}

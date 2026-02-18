@@ -173,17 +173,17 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
   };
 
   return (
-    <div className="h-full flex flex-col p-4 overflow-hidden bg-gray-50 gap-3">
+    <div className="h-full flex flex-col p-4 overflow-hidden t-bg gap-3">
       {/* Search + actions bar */}
       <div className="flex gap-2 items-center">
         <div className="relative flex-1">
-          <Search size={15} className="absolute left-3 top-2.5 text-gray-400" />
+          <Search size={15} className="absolute left-3 top-2.5 t-text-m" />
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && doSearch()}
             placeholder="Search tags by name or pattern"
-            className="w-full bg-white border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-gray-900 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            className="w-full t-field-bg border t-field-border rounded-lg pl-9 pr-3 py-2 t-field-fg text-sm focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)]"
           />
         </div>
         <Button variant="primary" size="sm" onClick={doSearch}>
@@ -195,13 +195,13 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
       </div>
 
       {/* Breadcrumb */}
-      <div className="bg-white border border-gray-200 rounded-lg px-3 py-2">
-        <div className="flex items-center gap-2 text-sm text-gray-700">
-          <FolderOpen size={15} className="text-blue-600 shrink-0" />
+      <div className="t-surface border t-border-s rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-sm t-text-2">
+          <FolderOpen size={15} className="t-accent shrink-0" />
           {breadcrumbs.map((crumb, i) => (
             <React.Fragment key={i}>
-              {i > 0 && <span className="text-gray-300">/</span>}
-              <button onClick={() => navigateBreadcrumb(i)} className={`hover:text-blue-600 transition-colors ${i === breadcrumbs.length - 1 ? 'font-semibold text-gray-900' : ''}`}>
+              {i > 0 && <span className="t-text-m">/</span>}
+              <button onClick={() => navigateBreadcrumb(i)} className={`hover:t-accent transition-colors cursor-pointer ${i === breadcrumbs.length - 1 ? 'font-semibold t-text' : ''}`}>
                 {crumb}
               </button>
             </React.Fragment>
@@ -209,18 +209,18 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
         </div>
       </div>
 
-      {error && <div className="px-3 py-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">{error}</div>}
+      {error && <div className="px-3 py-2 t-err-soft border t-err-border rounded t-err text-sm">{error}</div>}
 
       {/* Write dialog */}
       {writeTag && (
-        <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="px-4 py-3 t-accent-soft border t-accent-border rounded-lg">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium text-blue-900">Write Tag Value</span>
-            <button onClick={() => { setWriteTag(null); setWriteStatus(null); }} className="text-gray-500 hover:text-gray-700"><X size={16} /></button>
+            <span className="text-sm font-medium t-text">Write Tag Value</span>
+            <button onClick={() => { setWriteTag(null); setWriteStatus(null); }} className="t-text-m hover:t-text-2 cursor-pointer"><X size={16} /></button>
           </div>
-          <div className="text-xs text-blue-700 font-mono mb-2">{writeTag}</div>
+          <div className="text-xs t-accent font-mono mb-2">{writeTag}</div>
           <div className="flex gap-2">
-            <input value={writeValue} onChange={e => setWriteValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && doWrite()} className="flex-1 bg-white border border-blue-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
+            <input value={writeValue} onChange={e => setWriteValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && doWrite()} className="flex-1 t-field-bg border t-accent-border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]" />
             <Button variant={writeStatus === 'success' ? 'success' : 'primary'} size="sm" onClick={doWrite} disabled={writeStatus === 'writing'}>
               {writeStatus === 'writing' ? 'Writing...' : writeStatus === 'success' ? 'Written' : 'Write'}
             </Button>
@@ -230,7 +230,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
 
       {/* Selection toolbar */}
       {selectedTags.length > 0 && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg">
+        <div className="flex items-center gap-2 px-3 py-2 t-accent-soft border t-accent-border rounded-lg">
           <Badge color="info">{selectedTags.length} selected</Badge>
           <Button variant="secondary" size="xs" onClick={readSelected}>
             <Eye size={13} /> Read Values
@@ -246,7 +246,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
 
       {/* Main content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 flex-1 min-h-0">
-        <div className="lg:col-span-2 border border-gray-200 rounded-lg bg-white overflow-y-auto">
+        <div className="lg:col-span-2 border t-border-s rounded-lg t-surface overflow-y-auto">
           {loading ? (
             <div className="h-full flex items-center justify-center">
               <LoadingSpinner label="Loading tags..." />
@@ -262,8 +262,8 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
             <div className="p-2 space-y-0.5">
               {/* Select all header */}
               {leafTags.length > 0 && (
-                <button onClick={toggleSelectAll} className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-500 hover:text-gray-700 w-full text-left">
-                  {allLeafsSelected ? <CheckSquare size={14} className="text-blue-600" /> : <Square size={14} />}
+                <button onClick={toggleSelectAll} className="flex items-center gap-2 px-3 py-1.5 text-xs t-text-m hover:t-text-2 w-full text-left cursor-pointer">
+                  {allLeafsSelected ? <CheckSquare size={14} className="t-accent" /> : <Square size={14} />}
                   {allLeafsSelected ? 'Deselect all' : `Select all ${leafTags.length} leaf tags`}
                 </button>
               )}
@@ -281,27 +281,27 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
                   <div
                     key={`${tag.name}-${i}`}
                     className={`group flex items-center gap-2 px-3 py-2 rounded border text-sm cursor-pointer transition-colors ${
-                      isSelected ? 'bg-blue-50 border-blue-200' :
-                      inWorkspace ? 'bg-green-50/50 border-green-100' :
-                      'border-transparent hover:bg-gray-50'
+                      isSelected ? 't-accent-soft t-accent-border' :
+                      inWorkspace ? 't-ok-soft t-ok-border' :
+                      'border-transparent hover:t-surface-h'
                     }`}
                     onClick={() => isFolder ? navigateFolder(tag) : toggleSelect(tag.name)}
                   >
-                    <span className={isFolder ? 'text-blue-500' : 'text-gray-500'}>{iconForTag(tag)}</span>
-                    <span className="flex-1 text-gray-900 font-mono text-xs">{tag.name}</span>
-                    {tag.dataType && <span className="text-gray-400 text-xs">{tag.dataType}</span>}
+                    <span className={isFolder ? 't-accent' : 't-text-m'}>{iconForTag(tag)}</span>
+                    <span className="flex-1 t-text font-mono text-xs">{tag.name}</span>
+                    {tag.dataType && <span className="t-text-m text-xs">{tag.dataType}</span>}
                     {val && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-green-50 text-green-700 font-mono">
+                      <span className="text-xs px-2 py-0.5 rounded t-ok-soft t-ok font-mono">
                         {String(val.value).slice(0, 20)}
                       </span>
                     )}
                     {inWorkspace && <Badge color="success">WS</Badge>}
                     {!isFolder && (
                       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={(e) => { e.stopPropagation(); onAddWorkspaceTags?.([fullPath]); }} className="text-gray-400 hover:text-blue-600 p-0.5" title="Add to workspace">
+                        <button onClick={(e) => { e.stopPropagation(); onAddWorkspaceTags?.([fullPath]); }} className="t-text-m hover:t-accent p-0.5 cursor-pointer" title="Add to workspace">
                           <Plus size={14} />
                         </button>
-                        <button onClick={(e) => { e.stopPropagation(); openWriteDialog(fullPath, val?.value); }} className="text-gray-400 hover:text-amber-600 p-0.5" title="Write value">
+                        <button onClick={(e) => { e.stopPropagation(); openWriteDialog(fullPath, val?.value); }} className="t-text-m hover:t-warn p-0.5 cursor-pointer" title="Write value">
                           <PencilLine size={14} />
                         </button>
                       </div>
@@ -314,18 +314,18 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
         </div>
 
         {/* Sidebar */}
-        <aside className="border border-gray-200 rounded-lg bg-white p-3 overflow-y-auto space-y-4">
+        <aside className="border t-border-s rounded-lg t-surface p-3 overflow-y-auto space-y-4">
           <div>
-            <div className="text-sm font-semibold text-gray-900 mb-2 flex items-center gap-1">
+            <div className="text-sm font-semibold t-text mb-2 flex items-center gap-1">
               Workspace Tags
               <Badge color="neutral">{workspaceTags.length}</Badge>
             </div>
             <div className="max-h-48 overflow-y-auto space-y-1">
-              {workspaceTags.length === 0 && <div className="text-xs text-gray-400">No workspace tags yet.</div>}
+              {workspaceTags.length === 0 && <div className="text-xs t-text-m">No workspace tags yet.</div>}
               {workspaceTags.map(t => (
-                <div key={t} className="text-xs font-mono text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 truncate" title={t}>
+                <div key={t} className="text-xs font-mono t-text-2 t-bg-alt border t-border-s rounded px-2 py-1 truncate" title={t}>
                   {t.split('/').pop()}
-                  <span className="text-gray-400 ml-1">({t.split('/').slice(0, -1).join('/')})</span>
+                  <span className="t-text-m ml-1">({t.split('/').slice(0, -1).join('/')})</span>
                 </div>
               ))}
             </div>
@@ -336,7 +336,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
       {/* Batch add modal */}
       {showBatchModal && (
         <Modal title="Batch Add Tags" onClose={() => setShowBatchModal(false)}>
-          <p className="text-sm text-gray-600 mb-3">Enter tag paths, one per line or comma-separated.</p>
+          <p className="text-sm t-text-2 mb-3">Enter tag paths, one per line or comma-separated.</p>
           <Textarea
             rows={8}
             value={batchInput}
@@ -359,17 +359,17 @@ function SearchResults({ results, onClear, onAdd, iconForTag }) {
   return (
     <div className="p-2 space-y-1">
       <div className="flex items-center justify-between px-2 py-1 mb-2">
-        <span className="text-sm text-gray-600">
+        <span className="text-sm t-text-2">
           <Badge color="neutral">{results.length}</Badge> results
         </span>
         <Button variant="ghost" size="xs" onClick={onClear}>Clear</Button>
       </div>
       {results.map((tag, i) => (
-        <div key={`${tag.fullPath || tag.name}-${i}`} className="group flex items-center gap-2 px-3 py-2 bg-gray-50 rounded border border-gray-100 text-sm hover:border-gray-200 transition-colors">
-          <span className="text-gray-500">{iconForTag(tag)}</span>
-          <span className="flex-1 text-gray-900 font-mono text-xs truncate">{tag.fullPath || tag.name}</span>
-          <span className="text-gray-400 text-xs">{tag.dataType || tag.tagType}</span>
-          <button onClick={() => onAdd(tag.fullPath || tag.path || tag.name)} className="text-gray-400 hover:text-blue-600 p-0.5" title="Add to workspace">
+        <div key={`${tag.fullPath || tag.name}-${i}`} className="group flex items-center gap-2 px-3 py-2 t-bg-alt rounded border t-border-s text-sm hover:t-border transition-colors">
+          <span className="t-text-m">{iconForTag(tag)}</span>
+          <span className="flex-1 t-text font-mono text-xs truncate">{tag.fullPath || tag.name}</span>
+          <span className="t-text-m text-xs">{tag.dataType || tag.tagType}</span>
+          <button onClick={() => onAdd(tag.fullPath || tag.path || tag.name)} className="t-text-m hover:t-accent p-0.5 cursor-pointer" title="Add to workspace">
             <Plus size={14} />
           </button>
         </div>

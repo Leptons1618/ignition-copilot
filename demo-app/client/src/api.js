@@ -17,9 +17,20 @@ export async function sendChat(messages, sessionId = 'default', options = {}) {
  */
 export function streamChat(messages, sessionId = 'default', options = {}, onEvent) {
   const controller = new AbortController();
+  const ACTIVITY_TIMEOUT_MS = 60000;
 
   (async () => {
+    let activityTimer;
+    const resetTimer = () => {
+      clearTimeout(activityTimer);
+      activityTimer = setTimeout(() => {
+        controller.abort();
+        onEvent({ type: 'error', data: { message: 'Response timed out after 60s. The LLM may be unavailable or overloaded.' } });
+      }, ACTIVITY_TIMEOUT_MS);
+    };
+
     try {
+      resetTimer();
       const res = await fetch(`${API}/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -28,7 +39,9 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
       });
 
       if (!res.ok) {
-        onEvent({ type: 'error', data: { message: `HTTP ${res.status}` } });
+        clearTimeout(activityTimer);
+        const errBody = await res.text().catch(() => '');
+        onEvent({ type: 'error', data: { message: `Server error ${res.status}: ${errBody || 'Unknown error'}` } });
         return;
       }
 
@@ -39,6 +52,7 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        resetTimer();
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
         buffer = parts.pop() || '';
@@ -60,14 +74,16 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
           }
         }
       }
+      clearTimeout(activityTimer);
     } catch (err) {
+      clearTimeout(activityTimer);
       if (err.name !== 'AbortError') {
         onEvent({ type: 'error', data: { message: err.message } });
       }
     }
   })();
 
-  return () => controller.abort();
+  return () => { controller.abort(); };
 }
 
 export async function getIgnitionStatus() {

@@ -312,6 +312,7 @@ export async function listModels(urlOverride = null) {
 
 /**
  * Streaming chat — yields SSE-style event objects.
+ * Streams with tools enabled from the start so users get immediate feedback.
  * Events: { type: 'token', data: string }
  *         { type: 'tool_start', data: { tool, args } }
  *         { type: 'tool_result', data: { tool, args, result, error } }
@@ -344,34 +345,80 @@ export async function* chatStream(messages, options = {}) {
   for (let iteration = 0; iteration < opts.maxIterations; iteration++) {
     const llmStarted = Date.now();
 
-    // First try with tools to detect tool calls (non-streaming)
-    const probeResp = await fetch(`${opts.ollamaUrl}/api/chat`, {
+    // Stream with tools enabled — gives immediate feedback instead of blocking probe
+    const streamResp = await fetch(`${opts.ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: opts.model,
         messages: currentMessages,
         tools: TOOLS,
-        stream: false,
+        stream: true,
         options: { temperature: opts.temperature, num_predict: opts.numPredict },
       }),
     });
 
-    if (!probeResp.ok) {
-      const errText = await probeResp.text().catch(() => '');
-      yield { type: 'error', data: { message: `Ollama error ${probeResp.status}: ${errText}` } };
+    if (!streamResp.ok) {
+      const errText = await streamResp.text().catch(() => '');
+      yield { type: 'error', data: { message: `Ollama error ${streamResp.status}: ${errText}` } };
       return;
     }
 
-    const probeData = await probeResp.json();
-    const assistant = probeData.message || { role: 'assistant', content: '' };
-    const calls = assistant.tool_calls || [];
+    const reader = streamResp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let iterationContent = '';
+    let detectedToolCalls = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const chunk = JSON.parse(line);
+          const token = chunk.message?.content || '';
+          if (token) {
+            iterationContent += token;
+            yield { type: 'token', data: token };
+          }
+          // Detect tool calls from the streamed response
+          if (chunk.message?.tool_calls?.length) {
+            detectedToolCalls = chunk.message.tool_calls;
+          }
+        } catch {
+          // skip malformed JSON line
+        }
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.trim()) {
+      try {
+        const chunk = JSON.parse(buffer);
+        const token = chunk.message?.content || '';
+        if (token) {
+          iterationContent += token;
+          yield { type: 'token', data: token };
+        }
+        if (chunk.message?.tool_calls?.length) {
+          detectedToolCalls = chunk.message.tool_calls;
+        }
+      } catch {}
+    }
+
     llmLatencies.push(Date.now() - llmStarted);
 
-    if (calls.length > 0) {
-      // Execute tools
-      currentMessages.push(assistant);
-      for (const call of calls) {
+    if (detectedToolCalls?.length) {
+      // Tool calls detected — execute them and continue the loop
+      const assistantMsg = { role: 'assistant', content: iterationContent, tool_calls: detectedToolCalls };
+      currentMessages.push(assistantMsg);
+
+      for (const call of detectedToolCalls) {
         const toolName = call.function.name;
         const toolArgs = parseToolArgs(call);
         yield { type: 'tool_start', data: { tool: toolName, args: toolArgs } };
@@ -380,65 +427,13 @@ export async function* chatStream(messages, options = {}) {
         yield { type: 'tool_result', data: { tool: toolName, args: toolArgs, result } };
         currentMessages.push({ role: 'tool', content: JSON.stringify(result, null, 2) });
       }
-      continue; // Next iteration for final summary
+      // Reset for next iteration — model will summarize tool results
+      fullContent = '';
+      continue;
     }
 
-    // No tool calls — stream the final text response
-    const llmStreamStarted = Date.now();
-    const streamResp = await fetch(`${opts.ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: opts.model,
-        messages: currentMessages,
-        stream: true,
-        options: { temperature: opts.temperature, num_predict: opts.numPredict },
-      }),
-    });
-
-    if (!streamResp.ok) {
-      yield { type: 'token', data: assistant.content || '' };
-      fullContent = assistant.content || '';
-    } else {
-      const reader = streamResp.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const chunk = JSON.parse(line);
-            const token = chunk.message?.content || '';
-            if (token) {
-              fullContent += token;
-              yield { type: 'token', data: token };
-            }
-          } catch {
-            // skip malformed JSON line
-          }
-        }
-      }
-      // Process remaining buffer
-      if (buffer.trim()) {
-        try {
-          const chunk = JSON.parse(buffer);
-          const token = chunk.message?.content || '';
-          if (token) {
-            fullContent += token;
-            yield { type: 'token', data: token };
-          }
-        } catch {}
-      }
-    }
-
-    llmLatencies.push(Date.now() - llmStreamStarted);
+    // No tool calls — this is the final text response
+    fullContent = iterationContent;
     break;
   }
 

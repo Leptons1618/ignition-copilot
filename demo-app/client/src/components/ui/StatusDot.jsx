@@ -1,11 +1,11 @@
 import React from 'react';
 
 const colors = {
-  success: 'bg-green-500',
-  warning: 'bg-amber-500',
-  error: 'bg-red-500',
-  info: 'bg-blue-500',
-  neutral: 'bg-gray-400',
+  success: 'bg-[var(--color-success)]',
+  warning: 'bg-[var(--color-warning)]',
+  error: 'bg-[var(--color-error)]',
+  info: 'bg-[var(--color-info)]',
+  neutral: 'bg-[var(--color-text-muted)]',
 };
 
 export default function StatusDot({ color = 'neutral', pulse = false, size = 'w-2 h-2' }) {

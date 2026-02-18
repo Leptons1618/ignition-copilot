@@ -6,6 +6,7 @@ Industrial automation demo stack with:
 
 - `demo-app`: React + Express operator-facing application
 - `mcp-server`: Python MCP server for Ignition integration
+- **AI Indexing & View Manipulation**: Advanced project analysis and safe view editing
 - Ignition Gateway assets (`tags.json`, `syntheticDataGen.py`)
 
 ## Services
@@ -14,6 +15,37 @@ Industrial automation demo stack with:
 - Demo API: `http://localhost:3001`
 - MCP server: stdio process (`mcp-server/ignition_mcp_server.py`)
 - Ignition Gateway (external dependency): usually `http://localhost:8088`
+
+## New: AI-Powered Features
+
+The MCP server now includes advanced AI capabilities:
+
+### Project Indexing
+- Automatically extract and catalog all views, scripts, tags, and dependencies
+- Build comprehensive dependency graphs
+- Enable intelligent querying and impact analysis
+
+### View Manipulation
+- Create new views from templates with automatic tag replacement
+- Safely modify existing views with automatic backup
+- Add components and update properties
+- Validate view structure and bindings
+
+**Quick Start:**
+```bash
+# Index your project
+cd mcp-server
+python index_project.py --project "C:\Path\To\Ignition\Project" --tags "../tags.json"
+
+# Query tag usage
+python index_project.py --project "C:\Path\To\Ignition\Project" --query tag --path "[default]Pump01/Status"
+```
+
+**Documentation:**
+- `AI_FEATURES_QUICKSTART.md` - Quick start guide
+- `docs/AI_INDEXING_GUIDE.md` - Comprehensive documentation
+- `NEWFEATURE.md` - Feature specification
+- `IGNITION_INDEXING_SCHEMA.md` - Index schema details
 
 ## Standard Workflow
 

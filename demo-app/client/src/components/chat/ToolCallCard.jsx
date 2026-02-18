@@ -40,21 +40,21 @@ export default function ToolCallCard({ toolCall }) {
     <Collapsible
       title={
         <span className="inline-flex items-center gap-1.5">
-          <Icon size={12} className="text-gray-500" />
+          <Icon size={12} className="t-text-m" />
           <span className="font-mono">{toolCall.tool}</span>
-          {argsStr && <span className="text-gray-400 truncate max-w-[200px]">({argsStr})</span>}
+          {argsStr && <span className="t-text-m truncate max-w-[200px]">({argsStr})</span>}
         </span>
       }
       badge={statusBadge}
-      className={isError ? 'border-red-200' : isRunning ? 'border-blue-200 animate-pulse' : 'border-gray-200'}
+      className={isError ? 't-err-border' : isRunning ? 't-accent-border animate-pulse' : 't-border-s'}
     >
       {toolCall.result && (
-        <pre className="p-2 bg-gray-50 text-xs text-gray-600 overflow-x-auto max-h-56 overflow-y-auto">
+        <pre className="p-2 t-bg-alt text-xs t-text-2 overflow-x-auto max-h-56 overflow-y-auto">
           {JSON.stringify(toolCall.result, null, 2)}
         </pre>
       )}
       {isRunning && (
-        <div className="p-3 text-xs text-gray-500">Executing...</div>
+        <div className="p-3 text-xs t-text-m">Executing...</div>
       )}
     </Collapsible>
   );

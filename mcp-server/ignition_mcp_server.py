@@ -22,6 +22,8 @@ from tools.tag_operations import create_tag_tools, handle_tag_operation, TOOL_NA
 from tools.historian import create_historian_tools, handle_historian_operation, TOOL_NAMES as HISTORIAN_TOOLS
 from tools.alarms import create_alarm_tools, handle_alarm_operation, TOOL_NAMES as ALARM_TOOLS
 from tools.diagnostics import create_diagnostic_tools, handle_diagnostic_operation, TOOL_NAMES as DIAGNOSTIC_TOOLS
+from tools.project_indexer import create_indexing_tools, handle_indexing_operation, TOOL_NAMES as INDEXING_TOOLS
+from tools.view_manipulation import create_view_tools, handle_view_operation, TOOL_NAMES as VIEW_TOOLS
 
 
 # Configure logging
@@ -46,6 +48,10 @@ for name in ALARM_TOOLS:
     _DISPATCH[name] = handle_alarm_operation
 for name in DIAGNOSTIC_TOOLS:
     _DISPATCH[name] = handle_diagnostic_operation
+for name in INDEXING_TOOLS:
+    _DISPATCH[name] = handle_indexing_operation
+for name in VIEW_TOOLS:
+    _DISPATCH[name] = handle_view_operation
 
 
 class IgnitionMCPServer:
@@ -85,6 +91,8 @@ class IgnitionMCPServer:
         self.tools.extend(create_historian_tools(self.client, self.config))
         self.tools.extend(create_alarm_tools(self.client, self.config))
         self.tools.extend(create_diagnostic_tools(self.client, self.config))
+        self.tools.extend(create_indexing_tools(self.client, self.config))
+        self.tools.extend(create_view_tools(self.client, self.config))
 
         logger.info(f"Loaded {len(self.tools)} MCP tools: {[t['name'] for t in self.tools]}")
 

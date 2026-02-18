@@ -11,7 +11,7 @@ import { Plus } from 'lucide-react';
  */
 export default function MarkdownRenderer({ text, onAddTag }) {
   return (
-    <div className="prose prose-sm max-w-none prose-headings:text-gray-900 prose-p:text-gray-700 prose-li:text-gray-700 prose-strong:text-gray-900 prose-a:text-blue-600 prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-[''] prose-code:after:content-[''] prose-table:text-sm prose-th:text-left prose-th:px-3 prose-th:py-1.5 prose-td:px-3 prose-td:py-1.5">
+    <div className="prose prose-sm max-w-none prose-headings:t-text prose-p:t-text-2 prose-li:t-text-2 prose-strong:t-text prose-a:t-accent prose-code:t-bg-alt prose-code:t-text prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:before:content-[''] prose-code:after:content-[''] prose-table:text-sm prose-th:text-left prose-th:px-3 prose-th:py-1.5 prose-td:px-3 prose-td:py-1.5">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -52,7 +52,7 @@ function renderTagPaths(children, onAddTag) {
         <button
           key={m.index}
           onClick={() => onAddTag(tagPath)}
-          className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-blue-50 border border-blue-200 text-blue-700 text-xs font-mono hover:bg-blue-100 transition-colors not-prose"
+          className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded t-accent-soft border t-accent-border t-accent text-xs font-mono hover:opacity-80 transition-colors not-prose cursor-pointer"
           title="Add to workspace"
         >
           {tagPath}

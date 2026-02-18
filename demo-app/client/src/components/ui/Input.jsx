@@ -3,7 +3,7 @@ import React from 'react';
 export function Input({ className = '', ...props }) {
   return (
     <input
-      className={`bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${className}`}
+      className={`t-field-bg border t-field-border rounded-lg px-3 py-2 text-sm t-field-fg placeholder:t-text-m focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)] transition-colors ${className}`}
       {...props}
     />
   );
@@ -12,7 +12,7 @@ export function Input({ className = '', ...props }) {
 export function Select({ className = '', children, ...props }) {
   return (
     <select
-      className={`bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${className}`}
+      className={`t-field-bg border t-field-border rounded-lg px-3 py-2 text-sm t-field-fg focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)] transition-colors ${className}`}
       {...props}
     >
       {children}
@@ -23,7 +23,7 @@ export function Select({ className = '', children, ...props }) {
 export function Textarea({ className = '', ...props }) {
   return (
     <textarea
-      className={`bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors ${className}`}
+      className={`t-field-bg border t-field-border rounded-lg px-3 py-2 text-sm t-field-fg placeholder:t-text-m focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)] transition-colors ${className}`}
       {...props}
     />
   );

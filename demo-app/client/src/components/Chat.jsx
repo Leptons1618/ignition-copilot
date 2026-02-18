@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Send, Bot, User, Wrench, ChevronDown, ChevronRight, Plus, Clock3, Settings2,
   Layers, Trash2, Download, StopCircle, Zap, Gauge, PanelRightOpen, PanelRightClose,
-  X, Tag, RefreshCw,
+  X, Tag, RefreshCw, AlertTriangle, WifiOff, RotateCcw,
 } from 'lucide-react';
 import { streamChat, getChatModels, getChatConfig, setChatConfig } from '../api.js';
 import MarkdownRenderer from './chat/MarkdownRenderer.jsx';
@@ -14,6 +14,8 @@ import { Select } from './ui/Input.jsx';
 import LoadingSpinner from './ui/LoadingSpinner.jsx';
 import EmptyState from './ui/EmptyState.jsx';
 import useTagPolling from '../hooks/useTagPolling.js';
+import { useNotifications } from '../lib/notifications.jsx';
+import logger from '../lib/logger.js';
 
 export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAddWorkspaceTags }) {
   const [messages, setMessages] = useState([]);
@@ -27,12 +29,16 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     maxIterations: 4,
     enableRagContext: true,
   });
+
+  const MAX_INPUT_LENGTH = 4000;
   const [showSettings, setShowSettings] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
+  const [connectionError, setConnectionError] = useState(null);
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
   const sessionIdRef = useRef(`session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  const notifications = useNotifications();
 
   const tagValues = useTagPolling(showWorkspace ? workspaceTags : [], 10000);
 
@@ -40,22 +46,32 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [m, c] = await Promise.all([getChatModels(), getChatConfig()]);
-        setModels(m.models || []);
-        setConfigState(prev => ({
-          ...prev,
-          model: c.defaultModel || prev.model || (m.models?.[0]?.name ?? ''),
-          temperature: c.temperature ?? prev.temperature,
-          numPredict: c.numPredict ?? prev.numPredict,
-          maxIterations: c.maxIterations ?? prev.maxIterations,
-          enableRagContext: c.enableRagContext ?? prev.enableRagContext,
-        }));
-      } catch {}
-    })();
+  const loadModelsAndConfig = useCallback(async () => {
+    try {
+      setConnectionError(null);
+      const [m, c] = await Promise.all([getChatModels(), getChatConfig()]);
+      const modelList = m.models || [];
+      setModels(modelList);
+      if (modelList.length === 0) {
+        setConnectionError('No LLM models found. Ensure Ollama is running with at least one model pulled.');
+        logger.warn('chat', 'no_models_found');
+      }
+      setConfigState(prev => ({
+        ...prev,
+        model: c.defaultModel || prev.model || (modelList[0]?.name ?? ''),
+        temperature: c.temperature ?? prev.temperature,
+        numPredict: c.numPredict ?? prev.numPredict,
+        maxIterations: c.maxIterations ?? prev.maxIterations,
+        enableRagContext: c.enableRagContext ?? prev.enableRagContext,
+      }));
+      logger.info('chat', 'config_loaded', { models: modelList.length });
+    } catch (err) {
+      setConnectionError(`Cannot connect to LLM service: ${err.message}. Ensure the server and Ollama are running.`);
+      logger.error('chat', 'config_load_failed', { error: err.message });
+    }
   }, []);
+
+  useEffect(() => { loadModelsAndConfig(); }, [loadModelsAndConfig]);
 
   useEffect(() => {
     if (seedPrompt?.prompt) {
@@ -86,8 +102,21 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
   };
 
   const send = useCallback(() => {
-    const text = input.trim();
+    const text = input.trim().slice(0, MAX_INPUT_LENGTH);
     if (!text || streaming) return;
+
+    // Basic input validation
+    if (text.length < 1) {
+      notifications.warning('Please enter a message.');
+      return;
+    }
+
+    if (!config.model) {
+      notifications.error('No model selected. Check Ollama connection in settings.');
+      return;
+    }
+
+    logger.track('chat_send', { messageLength: text.length, model: config.model });
 
     const userMsg = { role: 'user', content: text };
     const newMessages = [...messages, userMsg];
@@ -98,6 +127,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     }]);
     setInput('');
     setStreaming(true);
+    setConnectionError(null);
 
     const startedAt = performance.now();
 
@@ -124,6 +154,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
               msg.toolCalls = [...(msg.toolCalls || []), {
                 tool: event.data.tool, args: event.data.args, result: null, status: 'running',
               }];
+              logger.debug('chat', 'tool_start', { tool: event.data.tool });
               break;
             case 'tool_result': {
               const tcs = [...(msg.toolCalls || [])];
@@ -132,6 +163,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
                 tcs[idx] = { ...tcs[idx], result: event.data.result, status: event.data.result?.error ? 'error' : 'success' };
               }
               msg.toolCalls = tcs;
+              logger.debug('chat', 'tool_result', { tool: event.data.tool, hasError: !!event.data.result?.error });
 
               // Auto-detect chart data from query_history
               if (event.data.tool === 'query_history' && event.data.result?.data) {
@@ -139,13 +171,15 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
               }
               break;
             }
-            case 'done':
+            case 'done': {
               msg.content = event.data.content || msg.content;
               msg.toolCalls = event.data.toolCalls || msg.toolCalls;
               msg.model = event.data.model || msg.model;
-              msg.perf = event.data.perf || { totalMs: Math.round(performance.now() - startedAt) };
+              const totalMs = Math.round(performance.now() - startedAt);
+              msg.perf = event.data.perf || { totalMs };
               msg.streaming = false;
               setStreaming(false);
+              logger.perf('chat_response', totalMs, { model: msg.model, toolCalls: (msg.toolCalls || []).length });
 
               // Check for chart data in final tool calls
               for (const tc of (event.data.toolCalls || [])) {
@@ -154,12 +188,22 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
                 }
               }
               break;
-            case 'error':
-              msg.content = msg.content || `Error: ${event.data?.message || 'Unknown error'}`;
+            }
+            case 'error': {
+              const errorMsg = event.data?.message || 'Unknown error';
+              msg.content = msg.content || `Error: ${errorMsg}`;
               msg.error = true;
               msg.streaming = false;
               setStreaming(false);
+              logger.error('chat', 'stream_error', { error: errorMsg });
+
+              // Detect connection issues
+              if (errorMsg.includes('fetch') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('Failed')) {
+                setConnectionError('Lost connection to the LLM service. Check that Ollama is running.');
+                notifications.error('Chat connection lost. Check Ollama status.', 'Connection Error');
+              }
               break;
+            }
           }
 
           msgs[assistantIdx] = msg;
@@ -169,7 +213,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     );
 
     abortRef.current = abort;
-  }, [input, streaming, messages, config]);
+  }, [input, streaming, messages, config, notifications]);
 
   const stopStreaming = () => {
     abortRef.current?.();
@@ -214,14 +258,14 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
   };
 
   return (
-    <div className="h-full flex bg-gray-50">
+    <div className="h-full flex t-bg">
       {/* Main chat area */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="border-b border-gray-200 bg-white px-4 py-2 shrink-0">
+        <header className="border-b t-border-s t-surface px-4 py-2 shrink-0">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-sm text-gray-700">
-              <Bot size={16} className="text-blue-600" />
+            <div className="flex items-center gap-2 text-sm t-text-2">
+              <Bot size={16} className="t-accent" />
               <span className="font-semibold">Operational Chat</span>
               {messages.length > 0 && (
                 <Badge color="neutral">{messages.length} messages</Badge>
@@ -251,7 +295,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
                 <Settings2 size={14} />
               </Button>
 
-              <div className="w-px h-5 bg-gray-200" />
+              <div className="w-px h-5 t-border-s" />
 
               <Button variant="ghost" size="xs" onClick={() => setShowWorkspace(v => !v)} title="Workspace tags">
                 {showWorkspace ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
@@ -274,22 +318,22 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
           {showSettings && (
             <div className="mt-2 grid grid-cols-2 md:grid-cols-5 gap-2 text-xs pb-1">
               <div>
-                <label className="text-gray-500 block mb-0.5">Temperature</label>
-                <input type="number" step="0.1" min="0" max="1" value={config.temperature} onChange={e => persistConfig({ ...config, temperature: Number(e.target.value) })} className="w-full border border-gray-200 rounded px-2 py-1" />
+                <label className="t-text-m block mb-0.5">Temperature</label>
+                <input type="number" step="0.1" min="0" max="1" value={config.temperature} onChange={e => persistConfig({ ...config, temperature: Number(e.target.value) })} className="w-full border t-border-s rounded px-2 py-1 t-field-bg t-field-fg t-field-border" />
               </div>
               <div>
-                <label className="text-gray-500 block mb-0.5">Max Tokens</label>
-                <input type="number" min="64" max="2048" value={config.numPredict} onChange={e => persistConfig({ ...config, numPredict: Number(e.target.value) })} className="w-full border border-gray-200 rounded px-2 py-1" />
+                <label className="t-text-m block mb-0.5">Max Tokens</label>
+                <input type="number" min="64" max="2048" value={config.numPredict} onChange={e => persistConfig({ ...config, numPredict: Number(e.target.value) })} className="w-full border t-border-s rounded px-2 py-1 t-field-bg t-field-fg t-field-border" />
               </div>
               <div>
-                <label className="text-gray-500 block mb-0.5">Tool Iterations</label>
-                <input type="number" min="1" max="6" value={config.maxIterations} onChange={e => persistConfig({ ...config, maxIterations: Number(e.target.value) })} className="w-full border border-gray-200 rounded px-2 py-1" />
+                <label className="t-text-m block mb-0.5">Tool Iterations</label>
+                <input type="number" min="1" max="6" value={config.maxIterations} onChange={e => persistConfig({ ...config, maxIterations: Number(e.target.value) })} className="w-full border t-border-s rounded px-2 py-1 t-field-bg t-field-fg t-field-border" />
               </div>
-              <label className="inline-flex items-center gap-2 border border-gray-200 rounded px-2 py-1 bg-white self-end">
+              <label className="inline-flex items-center gap-2 border t-border-s rounded px-2 py-1 t-surface t-text-2 self-end cursor-pointer">
                 <input type="checkbox" checked={config.enableRagContext} onChange={e => persistConfig({ ...config, enableRagContext: e.target.checked })} />
                 RAG Context
               </label>
-              <div className="self-end text-gray-400">
+              <div className="self-end t-text-m">
                 Session: {sessionIdRef.current.slice(0, 16)}...
               </div>
             </div>
@@ -298,7 +342,21 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 && (
+          {/* Connection error banner */}
+          {connectionError && (
+            <div className="flex items-start gap-3 px-4 py-3 t-warn-soft border t-warn-border rounded-lg t-warn">
+              <WifiOff size={18} className="shrink-0 mt-0.5 t-warn" />
+              <div className="flex-1 text-sm">
+                <div className="font-medium mb-0.5">Connection Issue</div>
+                {connectionError}
+              </div>
+              <Button variant="outline" size="xs" onClick={loadModelsAndConfig}>
+                <RotateCcw size={12} /> Retry
+              </Button>
+            </div>
+          )}
+
+          {messages.length === 0 && !connectionError && (
             <EmptyState
               icon={Bot}
               title="Ask Operational Questions"
@@ -306,7 +364,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
               action={
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-w-3xl w-full">
                   {quickActions.map((qa, i) => (
-                    <button key={i} onClick={() => { setInput(qa.prompt); setTimeout(() => inputRef.current?.focus(), 50); }} className="px-3 py-2 text-sm bg-white hover:bg-gray-50 border border-gray-200 rounded-lg text-left text-gray-700 transition-colors">
+                    <button key={i} onClick={() => { setInput(qa.prompt); setTimeout(() => inputRef.current?.focus(), 50); }} className="px-3 py-2 text-sm t-surface hover:t-surface-h border t-border-s rounded-lg text-left t-text-2 transition-colors cursor-pointer">
                       {qa.label}
                     </button>
                   ))}
@@ -315,39 +373,40 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
             />
           )}
 
-          {messages.map((msg, i) => (
-            <MessageBubble
-              key={i}
-              msg={msg}
-              onShowChart={onShowChart}
-              onAddTag={(path) => onAddWorkspaceTags?.([path])}
-            />
-          ))}
+          {messages.map((msg, i) => {
+            // Skip the empty streaming assistant — the Thinking indicator below handles it
+            if (
+              msg.role === 'assistant' && msg.streaming &&
+              !msg.content && (!msg.toolCalls || msg.toolCalls.length === 0)
+            ) return null;
+            return (
+              <MessageBubble
+                key={i}
+                msg={msg}
+                onShowChart={onShowChart}
+                onAddTag={(path) => onAddWorkspaceTags?.([path])}
+              />
+            );
+          })}
 
           {streaming && messages[messages.length - 1]?.streaming && messages[messages.length - 1]?.content === '' && messages[messages.length - 1]?.toolCalls?.length === 0 && (
-            <div className="flex gap-3 items-start">
-              <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-xs text-white shrink-0">
-                <Bot size={14} />
-              </div>
-              <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-gray-500 shadow-sm">
-                <LoadingSpinner size={14} label="Thinking..." />
-              </div>
-            </div>
+            <ThinkingIndicator onCancel={stopStreaming} />
           )}
 
           <div ref={endRef} />
         </div>
 
         {/* Input area */}
-        <div className="border-t border-gray-200 p-4 bg-white shrink-0">
+        <div className="border-t t-border-s p-4 t-surface shrink-0">
           <div className="flex gap-2 max-w-5xl mx-auto">
             <textarea
               ref={inputRef}
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={e => setInput(e.target.value.slice(0, MAX_INPUT_LENGTH))}
               onKeyDown={e => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
               placeholder="Ask about tags, alarms, diagnostics, scripts, or paste tag paths..."
-              className="flex-1 bg-gray-50 border border-gray-200 rounded-lg px-4 py-2.5 text-gray-900 placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors min-h-[52px] text-sm"
+              className="flex-1 t-field-bg border t-field-border rounded-lg px-4 py-2.5 t-field-fg placeholder:t-text-m focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)] transition-colors min-h-[52px] text-sm"
+              maxLength={MAX_INPUT_LENGTH}
               disabled={streaming}
             />
             <div className="flex flex-col gap-1.5">
@@ -373,42 +432,42 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
 
       {/* Workspace sidebar */}
       {showWorkspace && (
-        <aside className="w-72 border-l border-gray-200 bg-white shrink-0 flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200">
-            <span className="text-xs font-semibold text-gray-700 inline-flex items-center gap-1">
+        <aside className="w-72 border-l t-border-s t-surface shrink-0 flex flex-col overflow-hidden">
+          <div className="flex items-center justify-between px-3 py-2 border-b t-border-s">
+            <span className="text-xs font-semibold t-text-2 inline-flex items-center gap-1">
               <Tag size={13} />
               Workspace Tags
               <Badge color="neutral">{workspaceTags.length}</Badge>
             </span>
-            <button onClick={() => setShowWorkspace(false)} className="text-gray-400 hover:text-gray-600">
+            <button onClick={() => setShowWorkspace(false)} className="t-text-m hover:t-text-2 cursor-pointer">
               <X size={14} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto p-2 space-y-1">
             {workspaceTags.length === 0 && (
-              <p className="text-xs text-gray-400 text-center py-4">No workspace tags. Add from Tag Explorer or paste paths.</p>
+              <p className="text-xs t-text-m text-center py-4">No workspace tags. Add from Tag Explorer or paste paths.</p>
             )}
             {workspaceTags.map(tag => {
               const val = tagValues.values[tag];
               return (
                 <div
                   key={tag}
-                  className="group flex items-center gap-1 px-2 py-1.5 rounded border border-gray-100 hover:border-gray-200 hover:bg-gray-50 transition-colors cursor-pointer"
+                  className="group flex items-center gap-1 px-2 py-1.5 rounded border t-border-s hover:t-surface-h transition-colors cursor-pointer"
                   onClick={() => insertTagToInput(tag)}
                   title="Click to insert into chat"
                 >
                   <div className="flex-1 min-w-0">
-                    <div className="text-[10px] font-mono text-gray-700 truncate">{tag.split('/').pop()}</div>
+                    <div className="text-[10px] font-mono t-text-2 truncate">{tag.split('/').pop()}</div>
                     {val && (
-                      <div className="text-[10px] text-gray-500">
-                        <span className="font-mono text-gray-900">{typeof val.value === 'number' ? val.value.toFixed(2) : String(val.value).slice(0, 12)}</span>
-                        <span className={`ml-1 ${val.quality === 'Good' ? 'text-green-600' : 'text-amber-600'}`}>{val.quality}</span>
+                      <div className="text-[10px] t-text-m">
+                        <span className="font-mono t-text">{typeof val.value === 'number' ? val.value.toFixed(2) : String(val.value).slice(0, 12)}</span>
+                        <span className={`ml-1 ${val.quality === 'Good' ? 't-ok' : 't-warn'}`}>{val.quality}</span>
                       </div>
                     )}
                   </div>
                   <button
                     onClick={(e) => { e.stopPropagation(); onAddWorkspaceTags && onAddWorkspaceTags(workspaceTags.filter(t => t !== tag)); }}
-                    className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 t-text-m hover:t-err transition-opacity cursor-pointer"
                     title="Remove"
                   >
                     <X size={12} />
@@ -418,7 +477,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
             })}
           </div>
           {workspaceTags.length > 0 && tagValues.lastUpdated && (
-            <div className="px-3 py-1.5 border-t border-gray-100 flex items-center gap-1 text-[10px] text-gray-400">
+            <div className="px-3 py-1.5 border-t t-border-s flex items-center gap-1 text-[10px] t-text-m">
               <RefreshCw size={10} />
               {new Date(tagValues.lastUpdated).toLocaleTimeString()}
             </div>
@@ -434,14 +493,14 @@ function MessageBubble({ msg, onShowChart, onAddTag }) {
 
   return (
     <div className={`flex gap-3 items-start ${isUser ? 'flex-row-reverse' : ''}`}>
-      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs shrink-0 ${isUser ? 'bg-gray-200 text-gray-700' : 'bg-blue-600 text-white'}`}>
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs shrink-0 ${isUser ? 't-surface t-text-2' : 't-accent-bg text-white'}`}>
         {isUser ? <User size={14} /> : <Bot size={14} />}
       </div>
       <div className={`max-w-4xl min-w-0 ${isUser ? 'text-right' : ''}`}>
-        <div className={`rounded-lg px-4 py-3 shadow-sm ${
-          isUser ? 'bg-blue-600 text-white' :
-          msg.error ? 'bg-red-50 border border-red-200 text-red-700' :
-          'bg-white border border-gray-200 text-gray-800'
+        <div className={`rounded-lg px-4 py-3 t-shadow ${
+          isUser ? 't-accent-bg text-white' :
+          msg.error ? 't-err-soft border t-err-border t-err' :
+          't-surface border t-border-s t-text'
         }`}>
           {isUser ? (
             <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
@@ -449,13 +508,13 @@ function MessageBubble({ msg, onShowChart, onAddTag }) {
             <MarkdownRenderer text={msg.content} onAddTag={onAddTag} />
           )}
           {msg.streaming && msg.content && (
-            <span className="inline-block w-1.5 h-4 bg-blue-500 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+            <span className="inline-block w-1.5 h-4 t-accent-bg animate-pulse ml-0.5 align-text-bottom rounded-sm" />
           )}
         </div>
 
         {/* Performance badge */}
         {msg.perf && !isUser && (
-          <div className="mt-1 inline-flex items-center gap-2 text-[11px] text-gray-500 bg-gray-100 rounded px-2 py-0.5">
+          <div className="mt-1 inline-flex items-center gap-2 text-[11px] t-text-m t-bg-alt rounded px-2 py-0.5">
             <Clock3 size={11} />
             <span>{msg.perf.totalMs}ms</span>
             <span>{msg.perf.llmCalls || 0} LLM</span>
@@ -479,8 +538,40 @@ function MessageBubble({ msg, onShowChart, onAddTag }) {
 
         {/* Model info */}
         {msg.model && !isUser && !msg.streaming && (
-          <div className="text-[11px] text-gray-400 mt-1">Model: {msg.model}</div>
+          <div className="text-[11px] t-text-m mt-1">Model: {msg.model}</div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function ThinkingIndicator({ onCancel }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const start = Date.now();
+    const iv = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const timedOut = elapsed > 30;
+  return (
+    <div className="flex gap-3 items-start">
+      <div className="w-8 h-8 rounded-full t-accent-bg flex items-center justify-center text-xs text-white shrink-0">
+        <Bot size={14} />
+      </div>
+      <div className="t-surface border t-border-s rounded-lg px-4 py-3 t-text-m t-shadow space-y-2">
+        <div className="flex items-center gap-2">
+          <LoadingSpinner size={14} label={timedOut ? 'Still waiting...' : 'Thinking...'} />
+          <span className="text-[11px] t-text-m">{elapsed}s</span>
+        </div>
+        {timedOut && (
+          <div className="flex items-center gap-2 text-xs t-warn">
+            <AlertTriangle size={12} />
+            <span>Taking longer than expected — the LLM may be slow or unavailable.</span>
+          </div>
+        )}
+        <button onClick={onCancel} className="text-xs t-text-m hover:t-err transition-colors cursor-pointer flex items-center gap-1">
+          <StopCircle size={12} /> Cancel
+        </button>
       </div>
     </div>
   );
