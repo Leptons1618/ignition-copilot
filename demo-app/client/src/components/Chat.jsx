@@ -17,7 +17,7 @@ import useTagPolling from '../hooks/useTagPolling.js';
 import { useNotifications } from '../lib/notifications.jsx';
 import logger from '../lib/logger.js';
 
-export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAddWorkspaceTags }) {
+export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAddWorkspaceTags, onRemoveWorkspaceTag }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -53,12 +53,15 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
       const modelList = m.models || [];
       setModels(modelList);
       if (modelList.length === 0) {
-        setConnectionError('No LLM models found. Ensure Ollama is running with at least one model pulled.');
+        setConnectionError('No LLM models found. Ensure Ollama is running with at least one model pulled (e.g., "ollama pull llama3.2:3b").');
         logger.warn('chat', 'no_models_found');
       }
+      const modelNames = modelList.map(x => x.name || x);
+      const preferred = c.defaultModel || prev.model;
+      const validModel = modelNames.includes(preferred) ? preferred : (modelNames[0] ?? '');
       setConfigState(prev => ({
         ...prev,
-        model: c.defaultModel || prev.model || (modelList[0]?.name ?? ''),
+        model: validModel,
         temperature: c.temperature ?? prev.temperature,
         numPredict: c.numPredict ?? prev.numPredict,
         maxIterations: c.maxIterations ?? prev.maxIterations,
@@ -247,9 +250,14 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     { label: 'Trend Findings', prompt: 'Query the last 1h trend for temperature, speed, and fan current and summarize anomalies.' },
   ];
 
+  const hasTagPaths = input.trim() && /\[.*\]/.test(input);
+
   const addFromInput = () => {
     const paths = input.split(/\r?\n|,/).map(v => v.trim()).filter(v => v.startsWith('['));
-    if (paths.length > 0) onAddWorkspaceTags?.(paths);
+    if (paths.length > 0) {
+      onAddWorkspaceTags?.(paths);
+      setInput('');
+    }
   };
 
   const insertTagToInput = (path) => {
@@ -347,8 +355,13 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
             <div className="flex items-start gap-3 px-4 py-3 t-warn-soft border t-warn-border rounded-lg t-warn">
               <WifiOff size={18} className="shrink-0 mt-0.5 t-warn" />
               <div className="flex-1 text-sm">
-                <div className="font-medium mb-0.5">Connection Issue</div>
-                {connectionError}
+                <div className="font-medium mb-1">Connection Issue</div>
+                <div className="mb-2">{connectionError}</div>
+                <div className="text-xs t-text-m space-y-0.5">
+                  <div>1. Ensure backend server is running (npm run dev)</div>
+                  <div>2. Ensure Ollama is running (ollama serve)</div>
+                  <div>3. Pull a model if needed (ollama pull llama3.2:3b)</div>
+                </div>
               </div>
               <Button variant="outline" size="xs" onClick={loadModelsAndConfig}>
                 <RotateCcw size={12} /> Retry
@@ -410,7 +423,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
               disabled={streaming}
             />
             <div className="flex flex-col gap-1.5">
-              <Button variant="outline" size="xs" onClick={addFromInput} disabled={!input.trim()}>
+              <Button variant="outline" size="xs" onClick={addFromInput} disabled={!hasTagPaths} title="Add tag paths from input to workspace">
                 <Plus size={13} />
                 Add Tags
               </Button>
@@ -466,7 +479,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
                     )}
                   </div>
                   <button
-                    onClick={(e) => { e.stopPropagation(); onAddWorkspaceTags && onAddWorkspaceTags(workspaceTags.filter(t => t !== tag)); }}
+                    onClick={(e) => { e.stopPropagation(); onRemoveWorkspaceTag?.(tag); }}
                     className="opacity-0 group-hover:opacity-100 t-text-m hover:t-err transition-opacity cursor-pointer"
                     title="Remove"
                   >

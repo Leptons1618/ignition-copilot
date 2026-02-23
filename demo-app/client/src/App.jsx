@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FolderTree, LineChart, LayoutDashboard, PlaySquare, Server,
   Compass, Activity, Search, Boxes, ScrollText, ChevronLeft, ChevronRight,
   Menu, X, Settings, Palette, Moon, Sun, FolderOpen, Tag,
-  ChartLine, MessageSquarePlus, Trash2, ChevronUp, ChevronDown,
+  ChartLine, MessageSquarePlus, Trash2, ChevronUp, ChevronDown, RefreshCw,
 } from 'lucide-react';
+import { readTags } from './api.js';
 import TagExplorer from './components/TagExplorer.jsx';
 import DynamicChart from './components/DynamicChart.jsx';
 import DemoScenarios from './components/DemoScenarios.jsx';
@@ -46,10 +47,64 @@ export default function App() {
   const [chatSeed, setChatSeed] = useState(null);
   const [showSearch, setShowSearch] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [navWidth, setNavWidth] = useState(192);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [workspaceExpanded, setWorkspaceExpanded] = useState(false);
+  const [workspacePopupOpen, setWorkspacePopupOpen] = useState(false);
+  const [workspaceValues, setWorkspaceValues] = useState({});
   const workspace = useTagWorkspace();
   const { themeId, switchTheme, themes } = useTheme();
+  const navResizeRef = useRef(null);
+  const workspaceBtnRef = useRef(null);
+
+  // Live workspace tag polling
+  useEffect(() => {
+    if (workspace.tags.length === 0) { setWorkspaceValues({}); return; }
+    const poll = async () => {
+      try {
+        const result = await readTags(workspace.tags);
+        if (result.success !== false && result.results) {
+          const vals = {};
+          result.results.forEach(v => { vals[v.path] = v; });
+          setWorkspaceValues(vals);
+        }
+      } catch {}
+    };
+    poll();
+    const iv = setInterval(poll, 5000);
+    return () => clearInterval(iv);
+  }, [workspace.tags.join(',')]);
+
+  // Nav resize drag handler
+  const startNavResize = useCallback((e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = navWidth;
+    const onMove = (ev) => {
+      const delta = ev.clientX - startX;
+      const newW = Math.max(56, Math.min(280, startW + delta));
+      setNavWidth(newW);
+      setSidebarCollapsed(newW < 80);
+    };
+    const onUp = () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }, [navWidth]);
+
+  // Close workspace popup on outside click
+  useEffect(() => {
+    if (!workspacePopupOpen) return;
+    const handler = (e) => {
+      if (workspaceBtnRef.current && !workspaceBtnRef.current.contains(e.target)) {
+        const popup = document.getElementById('workspace-popup');
+        if (popup && !popup.contains(e.target)) setWorkspacePopupOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handler);
+    return () => document.removeEventListener('pointerdown', handler);
+  }, [workspacePopupOpen]);
 
   useEffect(() => {
     logger.info('app', 'initialized');
@@ -113,7 +168,8 @@ export default function App() {
     switchTheme(ids[(idx + 1) % ids.length]);
   };
 
-  // Workspace tag groups for titlebar display
+  const actualNavWidth = sidebarCollapsed ? 56 : navWidth;
+
   const workspaceGroups = {};
   for (const tag of workspace.tags) {
     const parts = tag.split('/');
@@ -146,9 +202,10 @@ export default function App() {
         </div>
 
         {/* Center: workspace tags in titlebar */}
-        <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden px-2">
+        <div className="flex-1 flex items-center gap-2 min-w-0 overflow-hidden px-2 relative">
           <button
-            onClick={() => setWorkspaceExpanded(v => !v)}
+            ref={workspaceBtnRef}
+            onClick={() => setWorkspacePopupOpen(v => !v)}
             className="shrink-0 flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-md transition-colors t-surface t-text-2 cursor-pointer"
           >
             <FolderOpen size={12} />
@@ -158,52 +215,33 @@ export default function App() {
             >
               {workspace.tags.length}
             </span>
-            {workspace.tags.length > 0 && (workspaceExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
+            {workspace.tags.length > 0 && (workspacePopupOpen ? <ChevronUp size={10} /> : <ChevronDown size={10} />)}
           </button>
 
-          {/* Inline tag pills (collapsed view — show first few) */}
-          {!workspaceExpanded && workspace.tags.length > 0 && (
+          {/* Inline tag pills */}
+          {!workspacePopupOpen && workspace.tags.length > 0 && (
             <div className="flex items-center gap-1 overflow-hidden">
               {workspace.tags.slice(0, 4).map(tag => (
-                <span
-                  key={tag}
-                  title={tag}
-                  className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-md truncate max-w-[120px] t-surface t-text-2 border t-border-s"
-                >
+                <span key={tag} title={tag} className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded-md truncate max-w-[120px] t-surface t-text-2 border t-border-s">
                   {tag.split('/').pop()}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); workspace.removeTag(tag); }}
-                    className="hover:opacity-100 opacity-50 transition-opacity t-text-m cursor-pointer"
-                  >
+                  <button onClick={(e) => { e.stopPropagation(); workspace.removeTag(tag); }} className="hover:opacity-100 opacity-50 transition-opacity t-text-m cursor-pointer">
                     <X size={8} />
                   </button>
                 </span>
               ))}
-              {workspace.tags.length > 4 && (
-                <span className="text-[10px] px-1 t-text-m">+{workspace.tags.length - 4}</span>
-              )}
+              {workspace.tags.length > 4 && <span className="text-[10px] px-1 t-text-m">+{workspace.tags.length - 4}</span>}
             </div>
           )}
 
-          {/* Quick workspace actions */}
           {workspace.tags.length > 0 && (
             <div className="hidden md:flex items-center gap-1 ml-auto shrink-0">
-              <button
-                onClick={() => showChart(workspace.tags, '-1h')}
-                className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md transition-colors t-accent-soft t-accent cursor-pointer"
-              >
+              <button onClick={() => showChart(workspace.tags, '-1h')} className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md transition-colors t-accent-soft t-accent cursor-pointer">
                 <ChartLine size={10} /> Charts
               </button>
-              <button
-                onClick={() => openChatPrompt(`Read and summarize these workspace tags:\n${workspace.tags.join('\n')}`)}
-                className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md transition-colors t-info-soft t-info cursor-pointer"
-              >
+              <button onClick={() => openChatPrompt(`Read and summarize these workspace tags:\n${workspace.tags.join('\n')}`)} className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md transition-colors t-info-soft t-info cursor-pointer">
                 <MessageSquarePlus size={10} /> Chat
               </button>
-              <button
-                onClick={workspace.clearTags}
-                className="flex items-center gap-1 text-[10px] px-1.5 py-1 rounded-md transition-colors t-text-m cursor-pointer"
-              >
+              <button onClick={workspace.clearTags} className="flex items-center gap-1 text-[10px] px-1.5 py-1 rounded-md transition-colors t-text-m cursor-pointer">
                 <Trash2 size={10} />
               </button>
             </div>
@@ -251,37 +289,79 @@ export default function App() {
         </div>
       </header>
 
-      {/* Expanded workspace panel (below titlebar) */}
-      {workspaceExpanded && workspace.tags.length > 0 && (
+      {/* Floating workspace popup */}
+      {workspacePopupOpen && (
         <div
-          className="border-b px-4 py-2 shrink-0 animate-slide-up t-bg-alt t-border-s"
+          id="workspace-popup"
+          className="fixed z-40 animate-slide-up t-surface border t-border-s rounded-xl t-shadow-lg"
+          style={{ top: '52px', left: `${actualNavWidth + 16}px`, width: 'min(400px, calc(100vw - 120px))', maxHeight: 'calc(100vh - 100px)' }}
         >
-          <div className="flex flex-wrap gap-1.5">
+          <div className="flex items-center justify-between px-4 py-2.5 border-b t-border-s">
+            <span className="text-sm font-semibold t-text flex items-center gap-1.5">
+              <FolderOpen size={14} className="t-accent" />
+              Workspace Tags
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full t-accent-soft t-accent font-bold">{workspace.tags.length}</span>
+            </span>
+            <div className="flex items-center gap-1">
+              {workspace.tags.length > 0 && (
+                <>
+                  <button onClick={() => { showChart(workspace.tags, '-1h'); setWorkspacePopupOpen(false); }} className="text-[10px] px-2 py-1 rounded t-accent-soft t-accent cursor-pointer" title="Open in Charts">
+                    <ChartLine size={12} />
+                  </button>
+                  <button onClick={workspace.clearTags} className="text-[10px] px-2 py-1 rounded t-text-m hover:t-err cursor-pointer" title="Clear all">
+                    <Trash2 size={12} />
+                  </button>
+                </>
+              )}
+              <button onClick={() => setWorkspacePopupOpen(false)} className="p-1 t-text-m hover:t-text-2 cursor-pointer">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+          <div className="overflow-y-auto p-3 space-y-2" style={{ maxHeight: '400px' }}>
+            {workspace.tags.length === 0 && (
+              <p className="text-xs t-text-m text-center py-6">No tags in workspace. Add tags from the Tag Explorer.</p>
+            )}
             {Object.entries(workspaceGroups).map(([provider, tags]) => (
-              <div key={provider} className="flex items-center gap-1">
+              <div key={provider}>
                 {Object.keys(workspaceGroups).length > 1 && (
-                  <span className="text-[9px] uppercase tracking-wider mr-1 t-text-m">
-                    <Tag size={8} className="inline mr-0.5" />{provider}
-                  </span>
+                  <div className="flex items-center gap-1 text-[10px] t-text-m uppercase tracking-wider mb-1">
+                    <Tag size={10} />{provider}
+                  </div>
                 )}
-                {tags.map(tag => (
-                  <span
-                    key={tag}
-                    title={tag}
-                    className="inline-flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-md t-surface t-text-2 border t-border-s"
-                  >
-                    {tag.split('/').pop()}
-                    <button
-                      onClick={() => workspace.removeTag(tag)}
-                      className="opacity-50 hover:opacity-100 transition-opacity t-err cursor-pointer"
-                    >
-                      <X size={10} />
-                    </button>
-                  </span>
-                ))}
+                <div className="space-y-1">
+                  {tags.map(tag => {
+                    const val = workspaceValues[tag];
+                    return (
+                      <div key={tag} className="group flex items-center gap-2 px-2.5 py-1.5 rounded-lg border t-border-s hover:bg-[var(--color-surface-hover)] transition-colors" title={tag}>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-mono t-text-2 truncate">{tag.split('/').pop()}</div>
+                          <div className="text-[10px] t-text-m truncate">{tag}</div>
+                        </div>
+                        {val && (
+                          <span className="text-xs font-mono px-1.5 py-0.5 rounded t-bg-alt t-text shrink-0">
+                            {typeof val.value === 'number' ? val.value.toFixed(2) : String(val.value).slice(0, 12)}
+                          </span>
+                        )}
+                        {val && (
+                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${val.quality === 'Good' ? 'bg-[var(--color-success)]' : 'bg-[var(--color-warning)]'}`} />
+                        )}
+                        <button onClick={() => workspace.removeTag(tag)} className="opacity-0 group-hover:opacity-100 t-text-m hover:t-err cursor-pointer transition-opacity">
+                          <X size={12} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             ))}
           </div>
+          {workspace.tags.length > 0 && (
+            <div className="px-4 py-2 border-t t-border-s flex items-center gap-1.5 text-[10px] t-text-m">
+              <RefreshCw size={10} className="animate-spin" style={{ animationDuration: '3s' }} />
+              Live updates every 5s
+            </div>
+          )}
         </div>
       )}
 
@@ -290,11 +370,18 @@ export default function App() {
         {/* ─── Sidebar ─── */}
         <nav
           className={`
-            flex flex-col shrink-0 z-20 transition-all duration-200 border-r t-nav-bg t-border-s
-            ${sidebarCollapsed ? 'w-14' : 'w-48'}
+            flex flex-col shrink-0 z-20 transition-all duration-200 border-r t-nav-bg t-border-s relative
             ${mobileMenuOpen ? 'fixed inset-y-0 left-0 top-[49px] w-48 shadow-2xl' : 'hidden lg:flex'}
           `}
+          style={!mobileMenuOpen ? { width: `${actualNavWidth}px` } : undefined}
         >
+          {/* Drag handle for resize */}
+          {!mobileMenuOpen && (
+            <div
+              className="absolute right-0 top-0 bottom-0 w-1 cursor-ew-resize z-10 hover:bg-[var(--color-accent)] hover:w-1 transition-all"
+              onPointerDown={startNavResize}
+            />
+          )}
           <div className="flex-1 overflow-y-auto py-2 scrollbar-thin">
             {Object.entries(GROUP_LABELS).map(([group, label]) => {
               const groupTabs = TABS.filter(t => t.group === group);
@@ -334,7 +421,15 @@ export default function App() {
 
           {/* Collapse toggle */}
           <button
-            onClick={() => setSidebarCollapsed(v => !v)}
+            onClick={() => {
+              if (sidebarCollapsed) {
+                setSidebarCollapsed(false);
+                setNavWidth(192);
+              } else {
+                setSidebarCollapsed(true);
+                setNavWidth(56);
+              }
+            }}
             className="hidden lg:flex items-center justify-center py-2.5 border-t transition-colors t-border-s t-text-m cursor-pointer"
           >
             {sidebarCollapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
@@ -369,6 +464,7 @@ export default function App() {
         onShowChart={showChart}
         workspaceTags={workspace.tags}
         onAddWorkspaceTags={workspace.addTags}
+        onRemoveWorkspaceTag={workspace.removeTag}
         seedPrompt={chatSeed}
       />
 
