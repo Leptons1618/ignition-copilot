@@ -3,6 +3,7 @@ import {
   FolderOpen, FileJson, ChevronRight, ChevronDown, Plus, Save, Trash2, RefreshCw,
   Settings2, ExternalLink, Eye, Code, Layers, AlertTriangle, FolderTree, Search,
   X, Check, Layout, BarChart3, Bell, Navigation, FileCode, Database, Copy,
+  Wand2, Loader2, CheckCircle2, Monitor,
 } from 'lucide-react';
 import { useNotifications } from '../lib/notifications.jsx';
 
@@ -21,29 +22,408 @@ async function fetchJson(url, opts = {}) {
 
 // ─── Component Tree Renderer ─────────────────────────────
 
-function ComponentTree({ node, depth = 0 }) {
+function ComponentTree({ node, depth = 0, onSelectNode, selectedNodePath }) {
   const [expanded, setExpanded] = useState(depth < 2);
   if (!node || typeof node !== 'object') return null;
   const name = node.meta?.name || node.type?.split('.').pop() || 'unknown';
   const type = node.type || 'unknown';
   const hasChildren = node.children?.length > 0;
+  const nodePath = `${depth}-${name}`;
+  const isSelected = selectedNodePath === nodePath;
 
   return (
     <div>
       <button
-        onClick={() => hasChildren && setExpanded(v => !v)}
-        className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs hover:t-surface-h rounded transition-colors ${hasChildren ? 'cursor-pointer' : 'cursor-default'}`}
+        onClick={() => { if (hasChildren) setExpanded(v => !v); onSelectNode?.(node, nodePath); }}
+        className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs hover:t-surface-h rounded transition-colors cursor-pointer ${
+          isSelected ? 't-accent-soft t-accent font-semibold' : ''
+        }`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
         {hasChildren ? (expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />) : <span className="w-3" />}
         <span className="font-medium t-text">{name}</span>
         <span className="t-text-m text-[10px] truncate">{type}</span>
+        {node.props?.style && <span className="text-[9px] t-info px-1 rounded t-info-soft ml-auto">styled</span>}
       </button>
       {expanded && hasChildren && node.children.map((child, i) => (
-        <ComponentTree key={i} node={child} depth={depth + 1} />
+        <ComponentTree key={i} node={child} depth={depth + 1} onSelectNode={onSelectNode} selectedNodePath={selectedNodePath} />
       ))}
     </div>
   );
+}
+
+// ─── Node Properties Panel ───────────────────────────────
+
+function NodeProperties({ node }) {
+  if (!node) return (
+    <div className="p-4 text-xs t-text-m text-center">Click a component in the tree to view its properties</div>
+  );
+
+  const props = node.props || {};
+  const meta = node.meta || {};
+  const style = props.style || {};
+
+  return (
+    <div className="p-3 space-y-3 text-xs">
+      <div>
+        <div className="font-semibold t-text mb-1">{meta.name || 'unnamed'}</div>
+        <div className="font-mono text-[10px] t-text-m">{node.type}</div>
+      </div>
+      {Object.keys(props).length > 0 && (
+        <div>
+          <div className="font-semibold t-text-2 uppercase text-[10px] mb-1">Props</div>
+          {Object.entries(props).filter(([k]) => k !== 'style').map(([key, val]) => (
+            <div key={key} className="flex items-start gap-2 py-0.5">
+              <span className="font-mono font-medium t-accent shrink-0">{key}</span>
+              <span className="t-text-2 font-mono break-all">{typeof val === 'object' ? JSON.stringify(val) : String(val)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {Object.keys(style).length > 0 && (
+        <div>
+          <div className="font-semibold t-text-2 uppercase text-[10px] mb-1">Style</div>
+          {Object.entries(style).map(([key, val]) => (
+            <div key={key} className="flex items-center gap-2 py-0.5">
+              <span className="font-mono t-text-m">{key}</span>
+              <span className="t-text-2 font-mono">{String(val)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {node.children?.length > 0 && (
+        <div className="text-[10px] t-text-m">{node.children.length} child(ren)</div>
+      )}
+    </div>
+  );
+}
+
+// ─── View Preview Renderer ───────────────────────────────
+
+function ViewPreview({ viewContent }) {
+  if (!viewContent?.root) {
+    return <div className="flex items-center justify-center h-full t-text-m text-sm">No view content to preview</div>;
+  }
+
+  const pageConfig = viewContent.custom?.pageConfig;
+  return (
+    <div className="h-full overflow-auto bg-[#e8eaed] dark:bg-[#1a1a2e]">
+      {/* Simulated browser chrome */}
+      <div className="sticky top-0 z-10 bg-white dark:bg-[#2a2a3e] border-b border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-2 text-xs">
+        <div className="flex gap-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
+          <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
+          <span className="w-2.5 h-2.5 rounded-full bg-green-400" />
+        </div>
+        <div className="flex-1 bg-gray-100 dark:bg-[#1a1a2e] rounded px-3 py-0.5 text-gray-500 dark:text-gray-400 font-mono text-[11px] truncate">
+          {pageConfig?.url ? `localhost:8088/data/perspective/client/project${pageConfig.url}` : 'localhost:8088/data/perspective/client/project/view'}
+        </div>
+        {pageConfig?.title && <span className="text-gray-600 dark:text-gray-300 font-medium">{pageConfig.title}</span>}
+      </div>
+
+      {/* View canvas */}
+      <div className="p-4">
+        <div className="bg-white dark:bg-[#22223a] rounded-lg shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700" style={{ minHeight: 400 }}>
+          <PreviewNode node={viewContent.root} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function resolveBindingText(prop) {
+  if (prop && typeof prop === 'object' && prop.binding?.config?.path) {
+    const tagPath = prop.binding.config.path;
+    return `🔗 ${tagPath.split('/').pop()}`;
+  }
+  return typeof prop === 'string' ? prop : '';
+}
+
+function PreviewNode({ node }) {
+  if (!node || typeof node !== 'object') return null;
+  const type = node.type || '';
+  const props = node.props || {};
+  const rawStyle = props.style || {};
+  const style = { ...rawStyle };
+  const children = node.children || [];
+  const name = node.meta?.name || '';
+  const tip = `${type} — ${name}`;
+
+  // Flex container
+  if (type.includes('container.flex')) {
+    const dir = props.direction || 'column';
+    const justify = props.justify || 'flex-start';
+    const align = props.align || 'stretch';
+    const wrap = props.wrap || 'nowrap';
+    return (
+      <div
+        style={{ display: 'flex', flexDirection: dir, justifyContent: justify, alignItems: align, flexWrap: wrap, gap: style.gap || '4px', ...style, minHeight: children.length ? undefined : 40 }}
+        title={tip}
+      >
+        {children.map((child, i) => <PreviewNode key={i} node={child} />)}
+        {children.length === 0 && <PreviewEmpty name={name} type={type} />}
+      </div>
+    );
+  }
+
+  // Coord container
+  if (type.includes('container.coord')) {
+    return (
+      <div style={{ position: 'relative', ...style, minHeight: children.length ? 200 : 60 }} title={tip}>
+        {children.map((child, i) => (
+          <div key={i} style={{ position: 'absolute', ...(child.position || {}) }}>
+            <PreviewNode node={child} />
+          </div>
+        ))}
+        {children.length === 0 && <PreviewEmpty name={name} type={type} />}
+      </div>
+    );
+  }
+
+  // Label
+  if (type.includes('display.label')) {
+    const text = resolveBindingText(props.text) || name || 'Label';
+    return (
+      <div style={{ ...style }} title={tip}>
+        <span style={{ fontSize: style.fontSize || '14px', fontWeight: style.fontWeight || 'normal', color: style.color || 'inherit' }}>
+          {text}
+        </span>
+      </div>
+    );
+  }
+
+  // Gauge
+  if (type.includes('display.gauge')) {
+    const val = typeof props.value === 'number' ? props.value : 65;
+    const max = props.max || 100;
+    const pct = Math.min((val / max) * 100, 100);
+    return (
+      <div className="flex flex-col items-center justify-center p-3" style={{ ...style }} title={tip}>
+        <svg viewBox="0 0 120 70" width="100" height="60">
+          <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="#e5e7eb" strokeWidth="8" strokeLinecap="round" />
+          <path d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke="#6366f1" strokeWidth="8" strokeLinecap="round"
+            strokeDasharray={`${pct * 1.57} 157`} />
+          <text x="60" y="55" textAnchor="middle" fontSize="16" fontWeight="bold" fill="currentColor">{val}</text>
+        </svg>
+        <span className="text-[10px] mt-0.5 opacity-60">{name || 'Gauge'}</span>
+      </div>
+    );
+  }
+
+  // LED
+  if (type.includes('display.led')) {
+    const c = props.color || '#22c55e';
+    return (
+      <div className="flex items-center gap-2 p-2" style={{ ...style }} title={tip}>
+        <span className="inline-block w-3.5 h-3.5 rounded-full shadow-md" style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}` }} />
+        <span className="text-xs">{name || 'LED'}</span>
+      </div>
+    );
+  }
+
+  // Progress bar
+  if (type.includes('progress-bar')) {
+    const val = typeof props.value === 'number' ? props.value : 60;
+    return (
+      <div className="p-2" style={{ ...style }} title={tip}>
+        <div className="text-[10px] mb-0.5 opacity-60">{name || 'Progress'} — {val}%</div>
+        <div className="w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all" style={{ width: `${val}%`, background: 'linear-gradient(90deg, #6366f1, #8b5cf6)' }} />
+        </div>
+      </div>
+    );
+  }
+
+  // Button
+  if (type.includes('input.button')) {
+    return (
+      <button
+        className="px-4 py-1.5 text-sm font-medium rounded-md transition-colors"
+        style={{ backgroundColor: style.backgroundColor || '#6366f1', color: style.color || '#fff', ...style }}
+        title={tip}
+      >
+        {props.text || name || 'Button'}
+      </button>
+    );
+  }
+
+  // Toggle
+  if (type.includes('toggle-switch')) {
+    const on = props.value !== false;
+    return (
+      <div className="flex items-center gap-2 p-1" style={{ ...style }} title={tip}>
+        <div className={`w-9 h-5 rounded-full relative ${on ? 'bg-indigo-500' : 'bg-gray-300'}`}>
+          <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+        </div>
+        <span className="text-xs">{name}</span>
+      </div>
+    );
+  }
+
+  // Text field
+  if (type.includes('input.text-field') || type.includes('input.numeric')) {
+    return (
+      <div className="p-1" style={{ ...style }} title={tip}>
+        <div className="text-[10px] mb-0.5 opacity-60">{name}</div>
+        <div className="border border-gray-300 rounded px-2 py-1 text-xs bg-white dark:bg-gray-800 dark:border-gray-600">
+          {props.placeholder || props.value || '…'}
+        </div>
+      </div>
+    );
+  }
+
+  // Dropdown
+  if (type.includes('input.dropdown')) {
+    return (
+      <div className="p-1" style={{ ...style }} title={tip}>
+        <div className="text-[10px] mb-0.5 opacity-60">{name}</div>
+        <div className="border border-gray-300 rounded px-2 py-1 text-xs bg-white dark:bg-gray-800 dark:border-gray-600 flex items-center justify-between">
+          <span>{props.value || 'Select...'}</span>
+          <ChevronDown size={10} />
+        </div>
+      </div>
+    );
+  }
+
+  // Charts
+  if (type.includes('chart') || type.includes('easy-chart')) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center border border-gray-200 dark:border-gray-700 rounded-lg"
+        style={{ minHeight: 140, background: 'linear-gradient(180deg, #f8f9ff 0%, #f0f1ff 100%)', ...style }}
+        title={tip}
+      >
+        <svg viewBox="0 0 200 60" width="180" height="50" className="opacity-40">
+          <polyline points="0,50 20,30 40,45 60,20 80,35 100,15 120,25 140,10 160,30 180,20 200,25" fill="none" stroke="#6366f1" strokeWidth="2" />
+          <polyline points="0,55 20,40 40,50 60,35 80,42 100,30 120,38 140,28 160,40 180,35 200,38" fill="none" stroke="#a5b4fc" strokeWidth="1.5" strokeDasharray="4 2" />
+        </svg>
+        <div className="text-[11px] font-medium opacity-50 mt-1">{name || 'Trend Chart'}</div>
+      </div>
+    );
+  }
+
+  // Alarm tables
+  if (type.includes('alarm')) {
+    const isJournal = type.includes('journal');
+    return (
+      <div
+        className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden"
+        style={{ ...style }}
+        title={tip}
+      >
+        <div className="px-3 py-1.5 text-xs font-medium flex items-center gap-1.5" style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+          <Bell size={11} /> {isJournal ? 'Alarm Journal' : 'Active Alarms'}
+        </div>
+        <div className="text-[10px]">
+          <div className="flex border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <span className="flex-1 px-2 py-1 font-medium">Source</span>
+            <span className="w-16 px-2 py-1 font-medium">Priority</span>
+            <span className="w-16 px-2 py-1 font-medium">State</span>
+          </div>
+          {[
+            ['Motor M12 OverTemp', 'High', 'Active'],
+            ['Pump P5 LowFlow', 'Medium', 'Active'],
+            ['Conv C1 Jam', 'Low', 'Cleared'],
+          ].map((row, i) => (
+            <div key={i} className={`flex border-b border-gray-50 dark:border-gray-700 ${i === 0 ? 'bg-red-50/50' : ''}`}>
+              <span className="flex-1 px-2 py-1">{row[0]}</span>
+              <span className={`w-16 px-2 py-1 ${row[1] === 'High' ? 'text-red-600' : row[1] === 'Medium' ? 'text-orange-500' : 'text-blue-500'}`}>{row[1]}</span>
+              <span className="w-16 px-2 py-1">{row[2]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Navigation links
+  if (type.includes('navigation.link') || type.includes('link')) {
+    return (
+      <div className="px-3 py-1.5 hover:bg-gray-100/50 dark:hover:bg-white/5 rounded transition-colors" style={{ ...style }} title={tip}>
+        <span style={{ color: style.color || '#6366f1', fontSize: style.fontSize || '13px' }}>
+          {props.text || name || 'Link'} →
+        </span>
+      </div>
+    );
+  }
+
+  // Table
+  if (type.includes('display.table')) {
+    return (
+      <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden" style={{ ...style }} title={tip}>
+        <div className="text-[10px]">
+          <div className="flex border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <span className="flex-1 px-2 py-1 font-medium">Column A</span>
+            <span className="flex-1 px-2 py-1 font-medium">Column B</span>
+            <span className="flex-1 px-2 py-1 font-medium">Column C</span>
+          </div>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="flex border-b border-gray-50 dark:border-gray-700">
+              <span className="flex-1 px-2 py-1">Row {i}</span>
+              <span className="flex-1 px-2 py-1">Value</span>
+              <span className="flex-1 px-2 py-1">Data</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Markdown
+  if (type.includes('markdown')) {
+    return (
+      <div className="p-3 text-sm" style={{ ...style }} title={tip}>
+        <div className="opacity-60 italic">{props.source || name || 'Markdown content'}</div>
+      </div>
+    );
+  }
+
+  // Image
+  if (type.includes('display.image')) {
+    return (
+      <div className="flex items-center justify-center border border-dashed border-gray-300 rounded p-4" style={{ ...style }} title={tip}>
+        <div className="text-center text-xs opacity-40">
+          <Layout size={20} className="mx-auto mb-1" />
+          {name || 'Image'}
+        </div>
+      </div>
+    );
+  }
+
+  // Icon
+  if (type.includes('display.icon')) {
+    return (
+      <div className="inline-flex items-center justify-center p-1" style={{ ...style }} title={tip}>
+        <div className="w-6 h-6 rounded bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-[10px]">
+          ★
+        </div>
+      </div>
+    );
+  }
+
+  // Generic fallback container
+  return (
+    <div style={{ ...style, minHeight: children.length ? undefined : 30 }} title={tip}>
+      {children.map((child, i) => <PreviewNode key={i} node={child} />)}
+      {children.length === 0 && <PreviewEmpty name={name} type={type} />}
+    </div>
+  );
+}
+
+function PreviewEmpty({ name, type }) {
+  return (
+    <div className="flex items-center justify-center p-2 border border-dashed border-gray-300 dark:border-gray-600 rounded text-[10px] opacity-40" style={{ minHeight: 30 }}>
+      {name || type?.split('.').pop() || 'empty'}
+    </div>
+  );
+}
+
+function normalizePreviewStyle(style) {
+  const out = {};
+  for (const [k, v] of Object.entries(style)) {
+    out[k] = v;
+  }
+  return out;
 }
 
 // ─── View Tree Item ──────────────────────────────────────
@@ -75,8 +455,6 @@ function ViewTreeItem({ item, selected, onSelect, depth = 0, children }) {
   );
 }
 
-// ─── Template Picker ─────────────────────────────────────
-
 function ViewTreeItemRecursive({ item, selected, onSelect, depth = 0 }) {
   return (
     <ViewTreeItem item={item} selected={selected} onSelect={onSelect} depth={depth}>
@@ -93,6 +471,8 @@ function ViewTreeItemRecursive({ item, selected, onSelect, depth = 0 }) {
   );
 }
 
+// ─── Templates ───────────────────────────────────────────
+
 const TEMPLATES = [
   { id: 'blank', label: 'Blank', icon: Layout, desc: 'Empty flex container' },
   { id: 'kpi', label: 'KPI Dashboard', icon: BarChart3, desc: '4 KPI cards + trend chart' },
@@ -100,6 +480,341 @@ const TEMPLATES = [
   { id: 'alarm', label: 'Alarm View', icon: Bell, desc: 'Alarm status table' },
   { id: 'navigation', label: 'Navigation', icon: Navigation, desc: 'Sidebar navigation menu' },
 ];
+
+// ─── AI View Generator ───────────────────────────────────
+
+const AI_PRESETS = [
+  {
+    id: 'motor-dashboard',
+    label: 'Motor Dashboard',
+    icon: BarChart3,
+    desc: 'Speed, load, temp KPIs with trend chart and alarm status',
+    prompt: 'Create a motor monitoring dashboard with KPI cards showing Speed (RPM), Load (%), Temperature (°F), and a Running status indicator. Add an Easy Chart for historical trending and an alarm status table at the bottom. Use a column layout with a header label.',
+    suggestedName: 'Dashboards/MotorDashboard',
+    suggestedTags: ['[default]DemoPlant/MotorM12/Speed', '[default]DemoPlant/MotorM12/LoadPercent', '[default]DemoPlant/MotorM12/Temperature', '[default]DemoPlant/MotorM12/Running'],
+  },
+  {
+    id: 'plant-overview',
+    label: 'Plant Overview',
+    icon: Layout,
+    desc: 'High-level plant status with KPIs and navigation links',
+    prompt: 'Create a plant overview page with a header showing the plant name "DemoPlant", 6 KPI cards in a 3x2 grid showing OEE, Production Rate, Throughput, Downtime, Quality, and Energy Usage. Add navigation links to Dashboards/MotorDashboard and Alarms at the bottom.',
+    suggestedName: 'Overview/PlantOverview',
+    suggestedTags: [],
+  },
+  {
+    id: 'alarm-display',
+    label: 'Alarm Management',
+    icon: Bell,
+    desc: 'Active alarms table with filters and summary KPIs',
+    prompt: 'Create an alarm management view with a summary row showing 4 KPI cards for Critical, High, Medium, Low alarm counts. Below that, add an alarm status table and an alarm journal table. Use red/orange/yellow/blue color coding.',
+    suggestedName: 'Alarms/AlarmDashboard',
+    suggestedTags: [],
+  },
+  {
+    id: 'asset-detail',
+    label: 'Asset Detail Page',
+    icon: Eye,
+    desc: 'Detailed asset view with properties, chart, and controls',
+    prompt: 'Create an asset detail page with a header showing the asset name as a parameter. Left side has a property panel showing Status, Speed, Temperature, Load, and Run Hours as labels. Right side has a large Easy Chart for trending. Bottom has Start/Stop buttons and a navigation link back to the overview.',
+    suggestedName: 'Assets/AssetDetail',
+    suggestedTags: ['[default]DemoPlant/MotorM12/Speed', '[default]DemoPlant/MotorM12/Running'],
+  },
+  {
+    id: 'nav-menu',
+    label: 'Navigation Sidebar',
+    icon: Navigation,
+    desc: 'Sidebar navigation with grouped menu links',
+    prompt: 'Create a vertical navigation sidebar with a dark background (#1e293b). Include a logo area at top, then grouped links: Overview (Plant Overview, Production), Assets (Motor M12, Pump P5, Conveyor C1), Monitoring (Alarms, Trends, Reports). Each link should use ia.navigation.link.',
+    suggestedName: 'Navigation/Sidebar',
+    suggestedTags: [],
+  },
+];
+
+function AIViewGenerator({ project, onCreated, onClose }) {
+  const [prompt, setPrompt] = useState('');
+  const [viewName, setViewName] = useState('');
+  const [tagInput, setTagInput] = useState('');
+  const [selectedTags, setSelectedTags] = useState([]);
+  const [availableTags, setAvailableTags] = useState([]);
+  const [showTagBrowser, setShowTagBrowser] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [activePreset, setActivePreset] = useState(null);
+  const notifications = useNotifications();
+
+  // Load available tags
+  useEffect(() => {
+    fetch('/api/ignition/browse?path=[default]&recursive=true')
+      .then(r => r.ok ? r.json() : { tags: [] })
+      .then(d => {
+        const tags = (d.results || d.tags || []);
+        const flat = flattenTags(tags);
+        setAvailableTags(flat);
+      })
+      .catch(() => {});
+  }, []);
+
+  function flattenTags(tags) {
+    const out = [];
+    for (const t of tags) {
+      if (t.tagType === 'AtomicTag' || (t.dataType && t.tagType !== 'Folder' && t.tagType !== 'Provider')) {
+        out.push({ path: t.fullPath || t.path, name: t.name, dataType: t.dataType || 'Unknown', engUnit: t.engUnit || '' });
+      }
+      if (t.tags?.length) out.push(...flattenTags(t.tags));
+    }
+    return out;
+  }
+
+  const addTag = (tagPath) => {
+    if (!selectedTags.includes(tagPath)) setSelectedTags(prev => [...prev, tagPath]);
+  };
+
+  const removeTag = (tagPath) => {
+    setSelectedTags(prev => prev.filter(t => t !== tagPath));
+  };
+
+  const applyPreset = (preset) => {
+    setActivePreset(preset.id);
+    setPrompt(preset.prompt);
+    setViewName(preset.suggestedName);
+    setSelectedTags(preset.suggestedTags || []);
+    setResult(null);
+    setError(null);
+  };
+
+  const buildFullPrompt = () => {
+    let full = prompt;
+    if (selectedTags.length > 0) {
+      full += `\n\nBind the following Ignition tags to the relevant components:\n`;
+      selectedTags.forEach(t => { full += `- ${t}\n`; });
+      full += `\nFor tag bindings, set the component prop value to an object like: { "binding": { "type": "tag", "config": { "path": "${selectedTags[0]}" } } } for the appropriate properties (text, value, etc). This is how Ignition Perspective binds tag values to component properties.`;
+    }
+    return full;
+  };
+
+  const generate = async () => {
+    if (!prompt.trim() || !viewName.trim()) return;
+    setGenerating(true);
+    setError(null);
+    setResult(null);
+    try {
+      const data = await fetchJson(`${API}/${encodeURIComponent(project)}/generate-view`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: viewName.trim(),
+          prompt: buildFullPrompt(),
+          tags: selectedTags,
+        }),
+      });
+      setResult(data);
+      if (data.success) {
+        notifications.success(`View "${viewName}" generated with ${data.componentCount} components`);
+      } else {
+        setError(data.error || 'Generation failed');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const filteredTags = tagInput
+    ? availableTags.filter(t => t.path.toLowerCase().includes(tagInput.toLowerCase()) || t.name.toLowerCase().includes(tagInput.toLowerCase()))
+    : availableTags;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="t-surface rounded-xl t-shadow-lg border t-border-s max-w-4xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b t-border-s shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg t-accent-bg flex items-center justify-center">
+              <Wand2 size={16} className="text-white" />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold t-text">AI View Generator</h3>
+              <p className="text-xs t-text-m">Describe your UI and AI will create a Perspective view</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1.5 t-text-m hover:t-text-2 hover:t-surface-h rounded-lg cursor-pointer"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          <div className="flex min-h-0">
+            {/* Left side — form */}
+            <div className="flex-1 p-5 space-y-4 border-r t-border-s overflow-y-auto">
+              {/* Preset scenarios */}
+              <div>
+                <label className="block text-xs font-semibold t-text-2 uppercase mb-2">Quick Start Presets</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {AI_PRESETS.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => applyPreset(p)}
+                      className={`flex items-start gap-2 p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                        activePreset === p.id
+                          ? 't-accent-border t-accent-soft ring-1 ring-[var(--color-accent)]'
+                          : 't-border-s hover:t-border hover:t-surface-h'
+                      }`}
+                    >
+                      <p.icon size={14} className={`shrink-0 mt-0.5 ${activePreset === p.id ? 't-accent' : 't-text-m'}`} />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium t-text truncate">{p.label}</div>
+                        <div className="text-[10px] t-text-m leading-tight">{p.desc}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* View name */}
+              <div>
+                <label className="block text-xs font-semibold t-text-2 uppercase mb-1.5">View Path / Name</label>
+                <input
+                  value={viewName}
+                  onChange={e => setViewName(e.target.value)}
+                  placeholder="e.g. Pages/MotorDashboard"
+                  className="w-full border t-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                />
+              </div>
+
+              {/* Prompt */}
+              <div>
+                <label className="block text-xs font-semibold t-text-2 uppercase mb-1.5">Describe Your View</label>
+                <textarea
+                  value={prompt}
+                  onChange={e => { setPrompt(e.target.value); setActivePreset(null); }}
+                  placeholder="Create a motor monitoring dashboard with temperature KPI, speed gauge, vibration chart, and alarm status..."
+                  rows={5}
+                  className="w-full border t-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] resize-none"
+                />
+              </div>
+
+              {/* Selected tags */}
+              {selectedTags.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold t-text-2 uppercase mb-1.5">Tag Bindings ({selectedTags.length})</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedTags.map(t => (
+                      <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-mono t-accent-soft t-accent rounded-md">
+                        {t.split('/').pop()}
+                        <button onClick={() => removeTag(t)} className="hover:t-err cursor-pointer"><X size={10} /></button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Error */}
+              {error && (
+                <div className="flex items-start gap-2 p-3 t-err-soft border t-err-border rounded-lg text-sm t-err">
+                  <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              {/* Result */}
+              {result?.success && (
+                <div className="space-y-2">
+                  <div className="flex items-start gap-2 p-3 t-ok-soft border t-ok-border rounded-lg text-sm t-ok">
+                    <CheckCircle2 size={16} className="shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-medium">View created: {result.name}</div>
+                      <div className="text-xs mt-1">
+                        {result.validation?.hasRoot && '✓ Valid root'} | {result.componentCount} components | {result.tagBindings > 0 ? `🔗 ${result.tagBindings} tag bindings` : '○ No tag bindings'}
+                        {result.model && <span> | Model: {result.model}</span>}
+                      </div>
+                      {result.savedToDisk === false && (
+                        <div className="text-xs mt-1 text-amber-600">⚠ View not saved to Ignition directory (permissions). JSON available in response.</div>
+                      )}
+                    </div>
+                  </div>
+                  {result.view && (
+                    <div className="border t-border-s rounded-lg overflow-hidden">
+                      <div className="px-3 py-1.5 border-b t-border-s t-bg-alt text-xs font-medium t-text-m flex items-center gap-1.5">
+                        <Eye size={12} /> Generated View Preview
+                      </div>
+                      <div className="max-h-64 overflow-auto">
+                        <ViewPreview viewContent={result.view} />
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => { onCreated?.(); }}
+                    className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium t-accent t-accent-soft rounded-lg cursor-pointer"
+                  >
+                    <Eye size={14} /> Open in Project Manager
+                  </button>
+                </div>
+              )}
+
+              {/* Generate button */}
+              <button
+                onClick={generate}
+                disabled={!prompt.trim() || !viewName.trim() || generating}
+                className="w-full t-accent-bg text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {generating ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                {generating ? 'AI is generating your view...' : 'Generate View with AI'}
+              </button>
+            </div>
+
+            {/* Right side — tag browser */}
+            <div className="w-72 shrink-0 flex flex-col overflow-hidden">
+              <div className="px-3 py-2.5 border-b t-border-s flex items-center gap-2">
+                <Database size={13} className="t-accent" />
+                <span className="text-xs font-semibold t-text-2 uppercase">Tag Browser</span>
+                <span className="text-[10px] t-bg-alt px-1 rounded t-text-m ml-auto">{availableTags.length}</span>
+              </div>
+              <div className="px-2 py-2 border-b t-border-s">
+                <div className="relative">
+                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 t-text-m" />
+                  <input
+                    value={tagInput}
+                    onChange={e => setTagInput(e.target.value)}
+                    placeholder="Filter tags..."
+                    className="w-full pl-7 pr-2 py-1.5 text-xs border t-border rounded-md t-field-bg t-field-fg focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-1">
+                {filteredTags.length === 0 && (
+                  <div className="text-xs t-text-m text-center py-4">
+                    {availableTags.length === 0 ? 'No tags available — connect to Ignition or use mock data' : 'No matching tags'}
+                  </div>
+                )}
+                {filteredTags.slice(0, 100).map(tag => {
+                  const isSelected = selectedTags.includes(tag.path);
+                  return (
+                    <button
+                      key={tag.path}
+                      onClick={() => isSelected ? removeTag(tag.path) : addTag(tag.path)}
+                      className={`w-full flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors cursor-pointer ${
+                        isSelected ? 't-accent-soft t-accent' : 't-text-2 hover:t-surface-h'
+                      }`}
+                    >
+                      <span className={`w-3 h-3 rounded border flex items-center justify-center shrink-0 ${
+                        isSelected ? 't-accent-bg border-transparent' : 't-border'
+                      }`}>
+                        {isSelected && <Check size={8} className="text-white" />}
+                      </span>
+                      <span className="font-mono truncate">{tag.name}</span>
+                      <span className="text-[9px] t-text-m ml-auto shrink-0">{tag.dataType}</span>
+                      {tag.engUnit && <span className="text-[9px] t-info shrink-0">{tag.engUnit}</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── Main Component ──────────────────────────────────────
 
@@ -115,21 +830,22 @@ export default function ProjectManager() {
   const [editorText, setEditorText] = useState('');
   const [editorDirty, setEditorDirty] = useState(false);
   const [editorError, setEditorError] = useState(null);
-  const [activeTab, setActiveTab] = useState('tree'); // 'tree' | 'editor' | 'preview'
+  const [activeTab, setActiveTab] = useState('tree');
+  // 'tree' | 'editor' | 'preview'
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateView, setShowCreateView] = useState(false);
+  const [showAIGenerator, setShowAIGenerator] = useState(false);
   const [newViewName, setNewViewName] = useState('');
   const [newViewTemplate, setNewViewTemplate] = useState('blank');
   const [loading, setLoading] = useState(true);
-  const [resourceTab, setResourceTab] = useState('views'); // 'views' | 'scripts' | 'queries'
+  const [resourceTab, setResourceTab] = useState('views');
   const [configForm, setConfigForm] = useState({ ignitionDir: '', gatewayUrl: '' });
+  const [selectedNode, setSelectedNode] = useState(null);
+  const [selectedNodePath, setSelectedNodePath] = useState(null);
   const notifications = useNotifications();
   const editorRef = useRef(null);
 
-  // Load config + projects on mount
-  useEffect(() => {
-    loadConfig();
-  }, []);
+  useEffect(() => { loadConfig(); }, []);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -166,6 +882,8 @@ export default function ProjectManager() {
     setViewContent(null);
     setEditorText('');
     setEditorDirty(false);
+    setSelectedNode(null);
+    setSelectedNodePath(null);
     try {
       const [viewsData, scriptsData, queriesData] = await Promise.all([
         fetchJson(`${API}/${encodeURIComponent(projectName)}/views`),
@@ -182,6 +900,8 @@ export default function ProjectManager() {
 
   const loadView = useCallback(async (viewItem) => {
     setSelectedView(viewItem.path);
+    setSelectedNode(null);
+    setSelectedNodePath(null);
     try {
       const data = await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/view?path=${encodeURIComponent(viewItem.path)}`);
       setViewContent(data.content);
@@ -264,12 +984,18 @@ export default function ProjectManager() {
     setEditorText(text);
     setEditorDirty(true);
     try {
-      JSON.parse(text);
+      const parsed = JSON.parse(text);
       setEditorError(null);
+      setViewContent(parsed);
     } catch (err) {
       setEditorError(err.message);
     }
   };
+
+  const handleSelectNode = useCallback((node, path) => {
+    setSelectedNode(node);
+    setSelectedNodePath(path);
+  }, []);
 
   const perspectiveUrl = config?.gatewayUrl
     ? `${config.gatewayUrl}/data/perspective/client/${selectedProject}`
@@ -491,7 +1217,14 @@ export default function ProjectManager() {
 
           {/* Create View button */}
           {resourceTab === 'views' && (
-            <div className="p-2 border-t t-border-s">
+            <div className="p-2 border-t t-border-s space-y-1.5">
+              <button
+                onClick={() => setShowAIGenerator(true)}
+                disabled={!selectedProject}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium text-white t-accent-bg hover:opacity-90 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                <Wand2 size={14} /> AI Generate View
+              </button>
               <button
                 onClick={() => setShowCreateView(true)}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium t-accent t-accent-soft hover:opacity-90 rounded-lg transition-colors cursor-pointer"
@@ -524,6 +1257,7 @@ export default function ProjectManager() {
                 <div className="flex t-bg-alt rounded-lg p-0.5">
                   {[
                     { id: 'tree', label: 'Component Tree', icon: Layers },
+                    { id: 'preview', label: 'Preview', icon: Monitor },
                     { id: 'editor', label: 'JSON Editor', icon: Code },
                   ].map(tab => (
                     <button
@@ -559,36 +1293,67 @@ export default function ProjectManager() {
               {/* View content */}
               <div className="flex-1 overflow-hidden">
                 {activeTab === 'tree' && (
-                  <div className="h-full overflow-y-auto p-4">
-                    <div className="max-w-3xl">
-                      {/* View params & custom */}
-                      {viewContent.params && Object.keys(viewContent.params).length > 0 && (
-                        <div className="mb-4 p-3 t-bg-alt rounded-lg border t-border-s">
-                          <h4 className="text-xs font-semibold t-text-m uppercase mb-2">View Parameters</h4>
-                          <div className="grid grid-cols-2 gap-2">
-                            {Object.entries(viewContent.params).map(([key, val]) => (
-                              <div key={key} className="flex items-center gap-2 text-xs">
-                                <span className="font-mono font-medium t-text">{key}</span>
-                                <span className="t-text-m">=</span>
-                                <span className="t-text-2 font-mono">{JSON.stringify(val)}</span>
-                              </div>
-                            ))}
+                  <div className="h-full flex min-h-0">
+                    {/* Component tree */}
+                    <div className="flex-1 overflow-y-auto p-4">
+                      <div className="max-w-3xl">
+                        {/* View params */}
+                        {viewContent.params && Object.keys(viewContent.params).length > 0 && (
+                          <div className="mb-4 p-3 t-bg-alt rounded-lg border t-border-s">
+                            <h4 className="text-xs font-semibold t-text-m uppercase mb-2">View Parameters</h4>
+                            <div className="grid grid-cols-2 gap-2">
+                              {Object.entries(viewContent.params).map(([key, val]) => (
+                                <div key={key} className="flex items-center gap-2 text-xs">
+                                  <span className="font-mono font-medium t-text">{key}</span>
+                                  <span className="t-text-m">=</span>
+                                  <span className="t-text-2 font-mono">{JSON.stringify(val)}</span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      {/* Component tree */}
-                      <div className="t-surface rounded-lg border t-border-s">
-                        <div className="px-3 py-2 border-b t-border-s flex items-center gap-2">
-                          <Layers size={14} className="t-accent" />
-                          <span className="text-xs font-semibold t-text-2">Component Tree</span>
-                        </div>
-                        <div className="p-1">
-                          <ComponentTree node={viewContent.root} />
+                        {/* Page Config */}
+                        {viewContent.custom?.pageConfig && (
+                          <div className="mb-4 p-3 t-bg-alt rounded-lg border t-border-s">
+                            <h4 className="text-xs font-semibold t-text-m uppercase mb-2">Page Configuration</h4>
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              {Object.entries(viewContent.custom.pageConfig).map(([key, val]) => (
+                                <div key={key} className="flex items-center gap-2">
+                                  <span className="font-mono font-medium t-text">{key}</span>
+                                  <span className="t-text-2 font-mono">{JSON.stringify(val)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tree */}
+                        <div className="t-surface rounded-lg border t-border-s">
+                          <div className="px-3 py-2 border-b t-border-s flex items-center gap-2">
+                            <Layers size={14} className="t-accent" />
+                            <span className="text-xs font-semibold t-text-2">Component Tree</span>
+                          </div>
+                          <div className="p-1">
+                            <ComponentTree node={viewContent.root} onSelectNode={handleSelectNode} selectedNodePath={selectedNodePath} />
+                          </div>
                         </div>
                       </div>
                     </div>
+
+                    {/* Node properties sidebar */}
+                    <div className="w-64 border-l t-border-s t-surface overflow-y-auto shrink-0">
+                      <div className="px-3 py-2 border-b t-border-s flex items-center gap-2">
+                        <Settings2 size={12} className="t-accent" />
+                        <span className="text-xs font-semibold t-text-2">Properties</span>
+                      </div>
+                      <NodeProperties node={selectedNode} />
+                    </div>
                   </div>
+                )}
+
+                {activeTab === 'preview' && (
+                  <ViewPreview viewContent={viewContent} />
                 )}
 
                 {activeTab === 'editor' && (
@@ -687,6 +1452,15 @@ export default function ProjectManager() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* AI View Generator Modal */}
+      {showAIGenerator && selectedProject && (
+        <AIViewGenerator
+          project={selectedProject}
+          onCreated={() => { selectProject(selectedProject); setShowAIGenerator(false); }}
+          onClose={() => setShowAIGenerator(false)}
+        />
       )}
     </div>
   );

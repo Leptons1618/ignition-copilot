@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { readdir, readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, relative, sep, dirname } from 'path';
+import { chat as llmChat } from '../services/ollama.js';
 
 const router = Router();
 
@@ -265,6 +266,8 @@ router.get('/', async (req, res) => {
     const projects = [];
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
+      // Skip internal/hidden directories like .resources
+      if (entry.name.startsWith('.')) continue;
       const projectDir = join(PROJECTS_DIR, entry.name);
       const meta = await readJsonSafe(join(projectDir, 'project.json'));
       projects.push({
@@ -438,6 +441,260 @@ router.get('/:project/named-queries', async (req, res) => {
     if (!await dirExists(queriesDir)) return res.json({ success: true, queries: [] });
     res.json({ success: true, queries: await scanNamedQueries(queriesDir) });
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── AI View Generator ──────────────────────────────────
+
+const VIEW_GEN_SYSTEM = `You are an Ignition Perspective view generator. You MUST output ONLY valid JSON — no markdown, no code fences, no explanation text.
+
+Generate a complete Ignition Perspective view.json structure following this EXACT schema:
+{
+  "custom": {
+    "pageConfig": {
+      "title": "Page Title",
+      "url": "/page-url",
+      "loginRequired": false
+    }
+  },
+  "params": {},
+  "props": {
+    "defaultSize": { "width": 1200, "height": 800 }
+  },
+  "root": {
+    "type": "ia.container.flex",
+    "meta": { "name": "root" },
+    "position": {},
+    "props": { "direction": "column", "style": { "padding": "16px", "gap": "12px" } },
+    "children": [ ... ]
+  }
+}
+
+AVAILABLE COMPONENT TYPES:
+Containers:
+  ia.container.flex     — flexbox (direction, justify, align, wrap, gap).  Always wrap children.
+  ia.container.coord    — absolute-positioned children.
+
+Display:
+  ia.display.label      — text label.  Props: text, style.
+  ia.display.icon       — icon.  Props: path (material icon name), style.
+  ia.display.image      — image.  Props: src, style.
+  ia.display.markdown   — rich markdown.  Props: source.
+  ia.display.gauge      — semicircular gauge.  Props: value, min, max, style.
+  ia.display.led        — LED indicator.  Props: color, style.
+  ia.display.progress-bar — bar.  Props: value (0-100), style.
+
+Input:
+  ia.input.text-field   — text input.  Props: value, placeholder.
+  ia.input.numeric-field — number input.  Props: value, min, max.
+  ia.input.dropdown     — dropdown.  Props: options, value.
+  ia.input.toggle-switch — toggle.  Props: value (boolean).
+  ia.input.button       — button.  Props: text, style.
+
+Charts:
+  ia.chart.easy-chart   — time-series trend chart.  Props: tag paths, style.
+  ia.chart.pie          — pie chart.  Props: data, style.
+  ia.chart.bar          — bar chart.  Props: data, style.
+
+Tables:
+  ia.display.table      — data table.  Props: data, columns.
+  ia.alarm.status-table — active alarms.  Props: style.
+  ia.alarm.journal-table — alarm history.  Props: style.
+
+Navigation:
+  ia.navigation.link    — navigation link.  Props: text, href, style.
+
+STYLE RULES:
+- Use style objects: { "padding": "16px", "gap": "12px", "backgroundColor": "#f8f9fa", "borderRadius": "8px" }
+- For KPI cards use: { "flex": "1 1 200px", "padding": "16px", "backgroundColor": "#ffffff", "borderRadius": "8px", "boxShadow": "0 1px 3px rgba(0,0,0,0.08)", "textAlign": "center" }
+- For headers: { "fontSize": "22px", "fontWeight": "bold", "marginBottom": "4px" }
+- For chart containers: { "height": "300px", "backgroundColor": "#ffffff", "borderRadius": "8px", "padding": "12px" }
+
+TAG BINDINGS:
+When tags are provided, bind them to component props using this exact structure:
+{
+  "value": {
+    "binding": {
+      "type": "tag",
+      "config": {
+        "path": "[default]DemoPlant/MotorM12/Speed"
+      }
+    }
+  }
+}
+— Use "text" prop for labels, "value" prop for gauges/inputs/LEDs.
+
+COMPONENT RULES:
+- Every component MUST have: type, props, meta: { "name": "unique-kebab-name" }
+- Every container MUST have: children (array)
+- Give every component a descriptive meta.name
+
+CRITICAL: Output ONLY the JSON object, nothing else. No markdown fences. No commentary.`;
+
+function validateViewJson(content) {
+  const result = {
+    valid: true,
+    errors: [],
+    hasRoot: false,
+    hasPageConfig: false,
+    componentCount: 0,
+    tagBindings: 0,
+  };
+
+  if (!content || typeof content !== 'object') {
+    result.valid = false;
+    result.errors.push('Content is not a valid object');
+    return result;
+  }
+
+  if (!content.root) {
+    result.valid = false;
+    result.errors.push('Missing root property');
+  } else {
+    result.hasRoot = true;
+    if (!content.root.type) result.errors.push('Root missing type');
+    if (!content.root.meta) result.errors.push('Root missing meta');
+  }
+
+  result.hasPageConfig = !!(content.custom?.pageConfig);
+
+  // Count components and tag bindings recursively
+  function walkNodes(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.type) result.componentCount++;
+    // Check for tag bindings anywhere in props
+    if (node.props) {
+      const propsStr = JSON.stringify(node.props);
+      const bindMatches = propsStr.match(/"binding"\s*:\s*\{/g);
+      if (bindMatches) result.tagBindings += bindMatches.length;
+    }
+    if (Array.isArray(node.children)) {
+      for (const child of node.children) walkNodes(child);
+    }
+  }
+  walkNodes(content.root);
+
+  // Ensure basic structure exists (auto-fix missing fields)
+  if (!content.custom) content.custom = {};
+  if (!content.params) content.params = {};
+  if (!content.props) content.props = {};
+  if (!content.root?.position) {
+    if (content.root) content.root.position = {};
+  }
+
+  if (result.errors.length > 0 && !result.hasRoot) result.valid = false;
+  return result;
+}
+
+/** Generate a view using the configured LLM */
+router.post('/:project/generate-view', async (req, res) => {
+  try {
+    const { name, prompt, tags } = req.body;
+    if (!name || !prompt) {
+      return res.status(400).json({ success: false, error: 'name and prompt are required' });
+    }
+
+    // Validate project exists
+    const projectDir = safePath(PROJECTS_DIR, req.params.project);
+    if (!await dirExists(projectDir)) {
+      return res.status(404).json({ success: false, error: 'Project not found' });
+    }
+
+    // Check if view already exists
+    const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', name);
+    if (await dirExists(viewDir)) {
+      return res.status(409).json({ success: false, error: `View "${name}" already exists. Choose a different name.` });
+    }
+
+    console.log(`[projects] Generating view "${name}" for ${req.params.project} via LLM...`);
+    const tagList = Array.isArray(tags) && tags.length > 0 ? tags : [];
+
+    // Build user message
+    let userMsg = `Create an Ignition Perspective view for: ${prompt}\n\nThe view path will be: ${name}`;
+    if (tagList.length > 0) {
+      userMsg += `\n\nBind these tags to the relevant components:\n${tagList.map(t => `- ${t}`).join('\n')}`;
+    }
+    userMsg += `\n\nOutput ONLY the complete view.json — no markdown, no commentary.`;
+
+    // Call the LLM
+    const result = await llmChat(
+      [
+        { role: 'system', content: VIEW_GEN_SYSTEM },
+        { role: 'user', content: userMsg },
+      ],
+      { maxIterations: 1, enableRagContext: false, noTools: true, numPredict: 4096 }
+    );
+
+    // Extract JSON from the response
+    let viewContent;
+    const responseText = (result.content || '').trim();
+    // Handle potential markdown fences from LLM
+    const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
+    const jsonStr = (jsonMatch ? jsonMatch[1] : responseText).trim();
+
+    try {
+      viewContent = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error('[projects] LLM returned invalid JSON:', responseText.substring(0, 500));
+      return res.status(422).json({
+        success: false,
+        error: 'LLM returned invalid JSON. Try simplifying your prompt or choosing a different model.',
+        raw: responseText.substring(0, 1000),
+      });
+    }
+
+    // Validate the generated view
+    const validation = validateViewJson(viewContent);
+    if (!validation.valid) {
+      return res.status(422).json({
+        success: false,
+        error: `Invalid view structure: ${validation.errors.join(', ')}`,
+        validation,
+      });
+    }
+
+    // Write the view to disk
+    let savedToDisk = false;
+    try {
+      await mkdir(viewDir, { recursive: true });
+      await writeJsonSafe(join(viewDir, 'view.json'), viewContent);
+
+      // Create resource.json metadata
+      const resourceMeta = {
+        scope: 'G',
+        version: 1,
+        restricted: false,
+        overridable: true,
+        files: ['view.json'],
+        attributes: {
+          lastModification: {
+            actor: 'copilot-ai',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      };
+      await writeJsonSafe(join(viewDir, 'resource.json'), resourceMeta);
+      savedToDisk = true;
+    } catch (writeErr) {
+      console.warn(`[projects] Could not write to Ignition dir (${writeErr.code || writeErr.message}), view returned in response only`);
+    }
+
+    console.log(`[projects] Generated view "${name}" — ${validation.componentCount} components, ${validation.tagBindings} tag bindings${savedToDisk ? '' : ' (not saved to disk)'}`);
+
+    res.json({
+      success: true,
+      name,
+      validation,
+      view: viewContent,
+      savedToDisk,
+      pageConfig: viewContent.custom?.pageConfig || null,
+      componentCount: validation.componentCount,
+      tagBindings: validation.tagBindings,
+      model: result.model,
+    });
+  } catch (err) {
+    console.error('[projects] View generation error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

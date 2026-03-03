@@ -1,14 +1,21 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Settings, Server, Brain, FolderCog, Palette, Save, RotateCcw, CheckCircle2,
-  XCircle, Loader2, Eye, EyeOff, TestTube2, ExternalLink,
+  XCircle, Loader2, Eye, EyeOff, TestTube2, ExternalLink, Key, Globe, Cpu, Sparkles,
 } from 'lucide-react';
-import { getServiceConfig, updateServiceConfig, testServiceConnections } from '../api.js';
+import { getServiceConfig, updateServiceConfig, testServiceConnections, getChatModels } from '../api.js';
 import { useTheme } from '../lib/theme.jsx';
 import { useNotifications } from '../lib/notifications.jsx';
 
 const MAX_URL_LENGTH = 500;
 const MAX_FIELD_LENGTH = 200;
+
+const LLM_PROVIDERS = [
+  { id: 'ollama', label: 'Ollama (Local)', icon: Cpu, desc: 'Run models locally via Ollama' },
+  { id: 'copilot', label: 'GitHub Copilot', icon: Sparkles, desc: 'Use GitHub Copilot LLM API' },
+  { id: 'openai', label: 'OpenAI', icon: Brain, desc: 'OpenAI GPT models (gpt-4o, etc.)' },
+  { id: 'custom', label: 'Custom API', icon: Globe, desc: 'Any OpenAI-compatible endpoint' },
+];
 
 function sanitize(val) {
   if (typeof val !== 'string') return '';
@@ -34,12 +41,15 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [testResults, setTestResults] = useState(null);
   const [showPass, setShowPass] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [errors, setErrors] = useState({});
+  const [availableModels, setAvailableModels] = useState([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   const loadConfig = useCallback(async () => {
     try {
       const data = await getServiceConfig();
-      setConfig(data);
+      setConfig({ llmProvider: 'ollama', ...data });
       setDirty(false);
       setErrors({});
     } catch (err) {
@@ -50,12 +60,12 @@ export default function SettingsPage() {
   useEffect(() => { loadConfig(); }, [loadConfig]);
 
   const updateField = (field, value) => {
-    const sanitized = sanitize(value);
+    const sanitized = typeof value === 'string' ? sanitize(value) : value;
     setConfig(prev => ({ ...prev, [field]: sanitized }));
     setDirty(true);
 
-    // Validate URLs
-    if (field === 'ollamaUrl' || field === 'ignitionUrl') {
+    const urlFields = ['ollamaUrl', 'ignitionUrl', 'customApiUrl'];
+    if (urlFields.includes(field)) {
       if (sanitized && !isValidUrl(sanitized)) {
         setErrors(prev => ({ ...prev, [field]: 'Invalid URL format (must be http:// or https://)' }));
       } else {
@@ -97,6 +107,20 @@ export default function SettingsPage() {
     }
   };
 
+  const fetchModels = useCallback(async () => {
+    setLoadingModels(true);
+    try {
+      const data = await getChatModels();
+      setAvailableModels(data.models || []);
+    } catch {
+      setAvailableModels([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, []);
+
+  useEffect(() => { if (config) fetchModels(); }, [config?.llmProvider]);
+
   if (!config) {
     return (
       <div className="h-full flex items-center justify-center t-bg">
@@ -104,6 +128,8 @@ export default function SettingsPage() {
       </div>
     );
   }
+
+  const provider = config.llmProvider || 'ollama';
 
   return (
     <div className="h-full overflow-y-auto t-bg">
@@ -195,15 +221,168 @@ export default function SettingsPage() {
           </div>
         </Section>
 
-        {/* LLM / Ollama Section */}
-        <Section icon={Brain} title="LLM Service (Ollama)">
-          <SettingField
-            label="Ollama URL"
-            value={config.ollamaUrl}
-            onChange={v => updateField('ollamaUrl', v)}
-            placeholder="http://localhost:11434"
-            error={errors.ollamaUrl}
-          />
+        {/* LLM Provider Section */}
+        <Section icon={Brain} title="LLM Provider">
+          <div>
+            <label className="text-sm font-medium block mb-2 t-text-2">Chat Provider</label>
+            <div className="grid grid-cols-2 gap-3">
+              {LLM_PROVIDERS.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => updateField('llmProvider', p.id)}
+                  className={`flex items-start gap-3 p-3 rounded-xl border-2 text-left transition-all cursor-pointer ${
+                    provider === p.id ? 't-accent-border t-accent-soft' : 't-border-s hover:t-border'
+                  }`}
+                >
+                  <p.icon size={18} className={provider === p.id ? 't-accent' : 't-text-m'} />
+                  <div>
+                    <div className="text-sm font-medium t-text">{p.label}</div>
+                    <div className="text-xs t-text-m">{p.desc}</div>
+                  </div>
+                  {provider === p.id && <CheckCircle2 size={14} className="t-accent ml-auto shrink-0" />}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ollama settings */}
+          {provider === 'ollama' && (
+            <div className="space-y-3 pt-2 border-t t-border-s">
+              <SettingField
+                label="Ollama URL"
+                value={config.ollamaUrl}
+                onChange={v => updateField('ollamaUrl', v)}
+                placeholder="http://localhost:11434"
+                error={errors.ollamaUrl}
+              />
+              <div>
+                <label className="text-xs font-medium block mb-1.5 t-text-m">Default Model</label>
+                <div className="flex gap-2">
+                  <select
+                    value={config.ollamaModel || ''}
+                    onChange={e => updateField('ollamaModel', e.target.value)}
+                    className="flex-1 rounded-lg px-3 py-2 text-sm border t-field-bg t-field-fg t-field-border"
+                  >
+                    <option value="">Auto-detect</option>
+                    {availableModels.map(m => (
+                      <option key={m.name} value={m.name}>{m.name}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={fetchModels}
+                    disabled={loadingModels}
+                    className="px-3 py-2 rounded-lg text-sm border t-border-s t-text-m hover:t-text-2 transition-colors cursor-pointer"
+                  >
+                    {loadingModels ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                  </button>
+                </div>
+                {availableModels.length > 0 && (
+                  <div className="text-[10px] t-text-m mt-1">{availableModels.length} model(s) available</div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* GitHub Copilot settings */}
+          {provider === 'copilot' && (
+            <div className="space-y-3 pt-2 border-t t-border-s">
+              <div className="p-3 rounded-lg t-info-soft border t-info-border text-xs t-info">
+                GitHub Copilot uses your VS Code authentication. Ensure Copilot is installed and signed in.
+                The server will route requests through the Copilot Chat API.
+              </div>
+              <SettingField
+                label="Model"
+                value={config.copilotModel || 'gpt-4o'}
+                onChange={v => updateField('copilotModel', v)}
+                placeholder="gpt-4o"
+              />
+              <SettingField
+                label="API Token (optional override)"
+                value={config.copilotToken || ''}
+                onChange={v => updateField('copilotToken', v)}
+                placeholder="Leave blank to use VS Code auth"
+                type={showApiKey ? 'text' : 'password'}
+              />
+            </div>
+          )}
+
+          {/* OpenAI settings */}
+          {provider === 'openai' && (
+            <div className="space-y-3 pt-2 border-t t-border-s">
+              <div>
+                <label className="text-xs font-medium block mb-1.5 t-text-m">API Key</label>
+                <div className="relative">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={config.openaiApiKey || ''}
+                    onChange={e => updateField('openaiApiKey', e.target.value)}
+                    placeholder="sk-..."
+                    className="w-full rounded-lg px-3 py-2 text-sm border transition-colors pr-9 t-field-bg t-field-border t-field-fg"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 t-text-m cursor-pointer"
+                  >
+                    {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <SettingField
+                label="Model"
+                value={config.openaiModel || 'gpt-4o'}
+                onChange={v => updateField('openaiModel', v)}
+                placeholder="gpt-4o"
+              />
+              <SettingField
+                label="Organization ID (optional)"
+                value={config.openaiOrg || ''}
+                onChange={v => updateField('openaiOrg', v)}
+                placeholder="org-..."
+              />
+            </div>
+          )}
+
+          {/* Custom API settings */}
+          {provider === 'custom' && (
+            <div className="space-y-3 pt-2 border-t t-border-s">
+              <div className="p-3 rounded-lg t-info-soft border t-info-border text-xs t-info">
+                Any OpenAI-compatible API endpoint (LM Studio, vLLM, FastChat, etc.)
+              </div>
+              <SettingField
+                label="API Base URL"
+                value={config.customApiUrl || ''}
+                onChange={v => updateField('customApiUrl', v)}
+                placeholder="http://localhost:8080/v1"
+                error={errors.customApiUrl}
+              />
+              <div>
+                <label className="text-xs font-medium block mb-1.5 t-text-m">API Key (optional)</label>
+                <div className="relative">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={config.customApiKey || ''}
+                    onChange={e => updateField('customApiKey', e.target.value)}
+                    placeholder="Bearer token or API key"
+                    className="w-full rounded-lg px-3 py-2 text-sm border transition-colors pr-9 t-field-bg t-field-border t-field-fg"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(v => !v)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 t-text-m cursor-pointer"
+                  >
+                    {showApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </div>
+              <SettingField
+                label="Model Name"
+                value={config.customModel || ''}
+                onChange={v => updateField('customModel', v)}
+                placeholder="e.g. mistral-7b, codellama"
+              />
+            </div>
+          )}
         </Section>
 
         {/* Ignition Gateway Section */}
@@ -257,6 +436,12 @@ export default function SettingsPage() {
               <span>Server API</span>
               <code className="font-mono px-2 py-0.5 rounded t-surface t-text-2">
                 http://localhost:3001
+              </code>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>LLM Provider</span>
+              <code className="font-mono px-2 py-0.5 rounded t-surface t-text-2">
+                {LLM_PROVIDERS.find(p => p.id === provider)?.label || provider}
               </code>
             </div>
             <div className="flex items-center justify-between">

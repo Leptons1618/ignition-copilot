@@ -1,5 +1,5 @@
 /**
- * Ollama LLM service with tool calling, runtime config, and latency instrumentation.
+ * LLM service with multi-provider support (Ollama, OpenAI, Copilot, Custom), tool calling, and latency instrumentation.
  */
 
 import ignition from './ignition.js';
@@ -11,7 +11,7 @@ const DEFAULT_MODEL = process.env.OLLAMA_MODEL || 'llama3.2:3b';
 
 const HARD_LIMITS = {
   maxIterations: 6,
-  maxNumPredict: 2048,
+  maxNumPredict: 4096,
   minNumPredict: 64,
 };
 
@@ -22,6 +22,16 @@ const runtimeConfig = {
   numPredict: 900,
   maxIterations: 4,
   enableRagContext: true,
+  // Multi-provider config (loaded from service config)
+  llmProvider: 'ollama',
+  openaiApiKey: '',
+  openaiModel: 'gpt-4o',
+  openaiOrg: '',
+  copilotModel: 'gpt-4o',
+  copilotToken: '',
+  customApiUrl: '',
+  customApiKey: '',
+  customModel: '',
 };
 
 const MAX_CONTEXT_MESSAGES = 12;
@@ -58,18 +68,115 @@ function clamp(n, min, max) {
 }
 
 function mergeRuntimeOptions(options = {}) {
+  const provider = options.llmProvider || runtimeConfig.llmProvider || 'ollama';
   const out = {
+    provider,
     model: options.model || runtimeConfig.defaultModel,
     ollamaUrl: options.ollamaUrl || runtimeConfig.ollamaUrl,
     temperature: typeof options.temperature === 'number' ? options.temperature : runtimeConfig.temperature,
     numPredict: typeof options.numPredict === 'number' ? options.numPredict : runtimeConfig.numPredict,
     maxIterations: typeof options.maxIterations === 'number' ? options.maxIterations : runtimeConfig.maxIterations,
     enableRagContext: typeof options.enableRagContext === 'boolean' ? options.enableRagContext : runtimeConfig.enableRagContext,
+    // Provider-specific
+    openaiApiKey: runtimeConfig.openaiApiKey,
+    openaiModel: runtimeConfig.openaiModel,
+    openaiOrg: runtimeConfig.openaiOrg,
+    copilotModel: runtimeConfig.copilotModel,
+    copilotToken: runtimeConfig.copilotToken,
+    customApiUrl: runtimeConfig.customApiUrl,
+    customApiKey: runtimeConfig.customApiKey,
+    customModel: runtimeConfig.customModel,
   };
   out.temperature = clamp(out.temperature, 0, 1);
   out.numPredict = clamp(Math.round(out.numPredict), HARD_LIMITS.minNumPredict, HARD_LIMITS.maxNumPredict);
   out.maxIterations = clamp(Math.round(out.maxIterations), 1, HARD_LIMITS.maxIterations);
+
+  // Resolve effective model based on provider
+  if (provider === 'openai') out.model = out.openaiModel || 'gpt-4o';
+  else if (provider === 'copilot') out.model = out.copilotModel || 'gpt-4o';
+  else if (provider === 'custom') out.model = out.customModel || out.model;
+
   return out;
+}
+
+/** Build headers and URL for OpenAI-compatible providers */
+function getOpenAIEndpoint(opts) {
+  const provider = opts.provider;
+  let url, headers;
+
+  if (provider === 'openai') {
+    url = 'https://api.openai.com/v1/chat/completions';
+    headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${opts.openaiApiKey}` };
+    if (opts.openaiOrg) headers['OpenAI-Organization'] = opts.openaiOrg;
+  } else if (provider === 'copilot') {
+    url = 'https://api.githubcopilot.com/chat/completions';
+    headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${opts.copilotToken}`,
+      'Editor-Version': 'vscode/1.96.0',
+      'Copilot-Integration-Id': 'vscode-chat',
+    };
+  } else if (provider === 'custom') {
+    url = `${opts.customApiUrl}/chat/completions`;
+    headers = { 'Content-Type': 'application/json' };
+    if (opts.customApiKey) headers['Authorization'] = `Bearer ${opts.customApiKey}`;
+  }
+  return { url, headers };
+}
+
+/** Convert TOOLS to OpenAI function-calling format */
+function toolsToOpenAIFormat() {
+  return TOOLS.map(t => ({
+    type: 'function',
+    function: { name: t.function.name, description: t.function.description, parameters: t.function.parameters },
+  }));
+}
+
+/** Call an OpenAI-compatible API (non-streaming) */
+async function openaiChat(messages, opts, tools = null) {
+  const { url, headers } = getOpenAIEndpoint(opts);
+  const body = {
+    model: opts.model,
+    messages,
+    temperature: opts.temperature,
+    max_tokens: opts.numPredict,
+  };
+  if (tools) body.tools = toolsToOpenAIFormat();
+
+  const resp = await fetch(url, {
+    method: 'POST', headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(60000),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`${opts.provider} API error ${resp.status}: ${errText}`);
+  }
+  return resp.json();
+}
+
+/** Stream an OpenAI-compatible API */
+async function openaiStreamChat(messages, opts, tools = null) {
+  const { url, headers } = getOpenAIEndpoint(opts);
+  const body = {
+    model: opts.model,
+    messages,
+    temperature: opts.temperature,
+    max_tokens: opts.numPredict,
+    stream: true,
+  };
+  if (tools) body.tools = toolsToOpenAIFormat();
+
+  const resp = await fetch(url, {
+    method: 'POST', headers,
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text().catch(() => '');
+    throw new Error(`${opts.provider} API error ${resp.status}: ${errText}`);
+  }
+  return resp;
 }
 
 function normalizeIncomingMessages(messages) {
@@ -206,15 +313,16 @@ export async function chat(messages, options = {}) {
   const opts = mergeRuntimeOptions(options);
   const sessionId = options.sessionId || 'default';
 
+  const noTools = !!options.noTools;
   const compact = compactMessages(messages);
   const latestUser = getLastUserMessage(compact);
-  const sessionMsg = getSessionContextMessage(sessionId);
+  const sessionMsg = !noTools ? getSessionContextMessage(sessionId) : null;
 
   const ragStarted = Date.now();
-  const ragMsg = (opts.enableRagContext && shouldInjectDocs(latestUser)) ? await buildRagContextMessage(latestUser) : null;
+  const ragMsg = (!noTools && opts.enableRagContext && shouldInjectDocs(latestUser)) ? await buildRagContextMessage(latestUser) : null;
   const ragMs = Date.now() - ragStarted;
 
-  const baseMessages = [{ role: 'system', content: SYSTEM_PROMPT }];
+  const baseMessages = noTools ? [] : [{ role: 'system', content: SYSTEM_PROMPT }];
   if (sessionMsg) baseMessages.push({ role: 'system', content: sessionMsg });
   if (ragMsg) baseMessages.push({ role: 'system', content: ragMsg });
 
@@ -224,27 +332,40 @@ export async function chat(messages, options = {}) {
 
   for (let iteration = 0; iteration < opts.maxIterations; iteration++) {
     const llmStarted = Date.now();
-    const response = await fetch(`${opts.ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: opts.model,
-        messages: currentMessages,
-        tools: TOOLS,
-        stream: false,
-        options: { temperature: opts.temperature, num_predict: opts.numPredict },
-      }),
-    });
-    llmLatencies.push(Date.now() - llmStarted);
+    let assistant, calls;
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      throw new Error(`Ollama error ${response.status}: ${errText}`);
+    if (opts.provider === 'ollama') {
+      const response = await fetch(`${opts.ollamaUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: opts.model,
+          messages: currentMessages,
+          ...(noTools ? {} : { tools: TOOLS }),
+          stream: false,
+          options: { temperature: opts.temperature, num_predict: opts.numPredict },
+        }),
+      });
+      llmLatencies.push(Date.now() - llmStarted);
+
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`Ollama error ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      assistant = data.message || { role: 'assistant', content: '' };
+      calls = assistant.tool_calls || [];
+    } else {
+      // OpenAI-compatible
+      const data = await openaiChat(currentMessages, opts, noTools ? null : TOOLS);
+      llmLatencies.push(Date.now() - llmStarted);
+      const choice = data.choices?.[0]?.message || { role: 'assistant', content: '' };
+      assistant = choice;
+      calls = (choice.tool_calls || []).map(tc => ({
+        function: { name: tc.function.name, arguments: tc.function.arguments },
+      }));
     }
-
-    const data = await response.json();
-    const assistant = data.message || { role: 'assistant', content: '' };
-    const calls = assistant.tool_calls || [];
     if (calls.length === 0) {
       updateSessionState(sessionId, latestUser);
       return {
@@ -299,15 +420,62 @@ export function updateChatConfig(patch = {}) {
   runtimeConfig.numPredict = next.numPredict;
   runtimeConfig.maxIterations = next.maxIterations;
   runtimeConfig.enableRagContext = next.enableRagContext;
+  // Provider fields
+  if (patch.llmProvider) runtimeConfig.llmProvider = patch.llmProvider;
+  if (patch.openaiApiKey !== undefined) runtimeConfig.openaiApiKey = patch.openaiApiKey;
+  if (patch.openaiModel) runtimeConfig.openaiModel = patch.openaiModel;
+  if (patch.openaiOrg !== undefined) runtimeConfig.openaiOrg = patch.openaiOrg;
+  if (patch.copilotModel) runtimeConfig.copilotModel = patch.copilotModel;
+  if (patch.copilotToken !== undefined) runtimeConfig.copilotToken = patch.copilotToken;
+  if (patch.customApiUrl !== undefined) runtimeConfig.customApiUrl = patch.customApiUrl;
+  if (patch.customApiKey !== undefined) runtimeConfig.customApiKey = patch.customApiKey;
+  if (patch.customModel) runtimeConfig.customModel = patch.customModel;
   return getChatConfig();
 }
 
 export async function listModels(urlOverride = null) {
-  const base = urlOverride || runtimeConfig.ollamaUrl;
-  const resp = await fetch(`${base}/api/tags`);
-  if (!resp.ok) throw new Error(`Ollama models error: ${resp.status}`);
-  const data = await resp.json();
-  return data.models || [];
+  const provider = runtimeConfig.llmProvider || 'ollama';
+
+  if (provider === 'ollama') {
+    const base = urlOverride || runtimeConfig.ollamaUrl;
+    const resp = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error(`Ollama models error: ${resp.status}`);
+    const data = await resp.json();
+    return data.models || [];
+  }
+
+  if (provider === 'openai') {
+    const headers = { 'Authorization': `Bearer ${runtimeConfig.openaiApiKey}` };
+    if (runtimeConfig.openaiOrg) headers['OpenAI-Organization'] = runtimeConfig.openaiOrg;
+    const resp = await fetch('https://api.openai.com/v1/models', { headers, signal: AbortSignal.timeout(5000) });
+    if (!resp.ok) throw new Error(`OpenAI models error: ${resp.status}`);
+    const data = await resp.json();
+    return (data.data || []).filter(m => m.id.startsWith('gpt')).map(m => ({ name: m.id, size: 0 }));
+  }
+
+  if (provider === 'custom' && runtimeConfig.customApiUrl) {
+    try {
+      const headers = {};
+      if (runtimeConfig.customApiKey) headers['Authorization'] = `Bearer ${runtimeConfig.customApiKey}`;
+      const resp = await fetch(`${runtimeConfig.customApiUrl}/models`, { headers, signal: AbortSignal.timeout(5000) });
+      if (!resp.ok) return [{ name: runtimeConfig.customModel || 'default', size: 0 }];
+      const data = await resp.json();
+      return (data.data || data.models || []).map(m => ({ name: m.id || m.name, size: 0 }));
+    } catch {
+      return [{ name: runtimeConfig.customModel || 'default', size: 0 }];
+    }
+  }
+
+  if (provider === 'copilot') {
+    return [
+      { name: 'gpt-4o', size: 0 },
+      { name: 'gpt-4o-mini', size: 0 },
+      { name: 'gpt-4', size: 0 },
+      { name: 'claude-3.5-sonnet', size: 0 },
+    ];
+  }
+
+  return [];
 }
 
 /**
@@ -344,23 +512,31 @@ export async function* chatStream(messages, options = {}) {
 
   for (let iteration = 0; iteration < opts.maxIterations; iteration++) {
     const llmStarted = Date.now();
+    const isOllama = opts.provider === 'ollama';
 
-    // Stream with tools enabled — gives immediate feedback instead of blocking probe
-    const streamResp = await fetch(`${opts.ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: opts.model,
-        messages: currentMessages,
-        tools: TOOLS,
-        stream: true,
-        options: { temperature: opts.temperature, num_predict: opts.numPredict },
-      }),
-    });
+    let streamResp;
+
+    if (isOllama) {
+      // Ollama streaming with tools
+      streamResp = await fetch(`${opts.ollamaUrl}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: opts.model,
+          messages: currentMessages,
+          tools: TOOLS,
+          stream: true,
+          options: { temperature: opts.temperature, num_predict: opts.numPredict },
+        }),
+      });
+    } else {
+      // OpenAI-compatible streaming
+      streamResp = await openaiStreamChat(currentMessages, opts, TOOLS);
+    }
 
     if (!streamResp.ok) {
       const errText = await streamResp.text().catch(() => '');
-      yield { type: 'error', data: { message: `Ollama error ${streamResp.status}: ${errText}` } };
+      yield { type: 'error', data: { message: `LLM error ${streamResp.status}: ${errText}` } };
       return;
     }
 
@@ -370,45 +546,85 @@ export async function* chatStream(messages, options = {}) {
     let iterationContent = '';
     let detectedToolCalls = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+    if (isOllama) {
+      // Ollama NDJSON streaming
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        if (!line.trim()) continue;
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const chunk = JSON.parse(line);
+            const token = chunk.message?.content || '';
+            if (token) {
+              iterationContent += token;
+              yield { type: 'token', data: token };
+            }
+            if (chunk.message?.tool_calls?.length) {
+              detectedToolCalls = chunk.message.tool_calls;
+            }
+          } catch {}
+        }
+      }
+      if (buffer.trim()) {
         try {
-          const chunk = JSON.parse(line);
+          const chunk = JSON.parse(buffer);
           const token = chunk.message?.content || '';
           if (token) {
             iterationContent += token;
             yield { type: 'token', data: token };
           }
-          // Detect tool calls from the streamed response
           if (chunk.message?.tool_calls?.length) {
             detectedToolCalls = chunk.message.tool_calls;
           }
-        } catch {
-          // skip malformed JSON line
+        } catch {}
+      }
+    } else {
+      // OpenAI SSE streaming
+      let toolCallAccumulator = {};
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const payload = line.slice(6).trim();
+          if (payload === '[DONE]') continue;
+          try {
+            const chunk = JSON.parse(payload);
+            const delta = chunk.choices?.[0]?.delta;
+            if (!delta) continue;
+
+            if (delta.content) {
+              iterationContent += delta.content;
+              yield { type: 'token', data: delta.content };
+            }
+            // Accumulate tool calls from deltas
+            if (delta.tool_calls) {
+              for (const tc of delta.tool_calls) {
+                const idx = tc.index ?? 0;
+                if (!toolCallAccumulator[idx]) {
+                  toolCallAccumulator[idx] = { function: { name: '', arguments: '' } };
+                }
+                if (tc.function?.name) toolCallAccumulator[idx].function.name = tc.function.name;
+                if (tc.function?.arguments) toolCallAccumulator[idx].function.arguments += tc.function.arguments;
+              }
+            }
+          } catch {}
         }
       }
-    }
-
-    // Process remaining buffer
-    if (buffer.trim()) {
-      try {
-        const chunk = JSON.parse(buffer);
-        const token = chunk.message?.content || '';
-        if (token) {
-          iterationContent += token;
-          yield { type: 'token', data: token };
-        }
-        if (chunk.message?.tool_calls?.length) {
-          detectedToolCalls = chunk.message.tool_calls;
-        }
-      } catch {}
+      // Convert accumulated tool calls
+      const accTools = Object.values(toolCallAccumulator);
+      if (accTools.length > 0 && accTools.some(tc => tc.function.name)) {
+        detectedToolCalls = accTools;
+      }
     }
 
     llmLatencies.push(Date.now() - llmStarted);

@@ -57,16 +57,18 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
         logger.warn('chat', 'no_models_found');
       }
       const modelNames = modelList.map(x => x.name || x);
-      const preferred = c.defaultModel || prev.model;
-      const validModel = modelNames.includes(preferred) ? preferred : (modelNames[0] ?? '');
-      setConfigState(prev => ({
-        ...prev,
-        model: validModel,
-        temperature: c.temperature ?? prev.temperature,
-        numPredict: c.numPredict ?? prev.numPredict,
-        maxIterations: c.maxIterations ?? prev.maxIterations,
-        enableRagContext: c.enableRagContext ?? prev.enableRagContext,
-      }));
+      setConfigState(prev => {
+        const preferred = c.defaultModel || prev.model;
+        const validModel = modelNames.includes(preferred) ? preferred : (modelNames[0] ?? '');
+        return {
+          ...prev,
+          model: validModel,
+          temperature: c.temperature ?? prev.temperature,
+          numPredict: c.numPredict ?? prev.numPredict,
+          maxIterations: c.maxIterations ?? prev.maxIterations,
+          enableRagContext: c.enableRagContext ?? prev.enableRagContext,
+        };
+      });
       logger.info('chat', 'config_loaded', { models: modelList.length });
     } catch (err) {
       setConnectionError(`Cannot connect to LLM service: ${err.message}. Ensure the server and Ollama are running.`);
