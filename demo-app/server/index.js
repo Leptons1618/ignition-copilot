@@ -17,6 +17,7 @@ import insightsRoutes from './routes/insights.js';
 import configRoutes from './routes/config.js';
 import projectRoutes from './routes/projects.js';
 import searchRoutes, { logRoutes } from './routes/search.js';
+import viewRoutes from './routes/views.js';
 import { requestLogger } from './middleware/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -44,6 +45,7 @@ app.use('/api/config', configRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/search', searchRoutes);
 app.use('/api/logs', logRoutes);
+app.use('/api/views', viewRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
@@ -63,8 +65,12 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
+  const provider = (process.env.LLM_PROVIDER || 'ollama').toLowerCase();
   console.log(`\nIgnition Copilot Demo Server running on http://localhost:${PORT}`);
+  console.log(`LLM Provider: ${provider === 'github_models' ? 'GitHub Models' : 'Ollama'}`);
   console.log('Ignition Gateway: http://localhost:8088');
-  console.log('Ollama: http://localhost:11434');
+  if (process.env.IGNITION_PROJECT_PATH) {
+    console.log(`Project Path: ${process.env.IGNITION_PROJECT_PATH}`);
+  }
   console.log('React UI: http://localhost:3000 (dev mode)\n');
 });
