@@ -690,10 +690,10 @@ function validateViewJson(content) {
   function walkNodes(node) {
     if (!node || typeof node !== 'object') return;
     if (node.type) result.componentCount++;
-    // Check for tag bindings anywhere in props
-    if (node.props) {
-      const propsStr = JSON.stringify(node.props);
-      const bindMatches = propsStr.match(/"binding"\s*:\s*\{/g);
+    // Count tag bindings in propConfig (where Perspective stores bindings)
+    if (node.propConfig) {
+      const configStr = JSON.stringify(node.propConfig);
+      const bindMatches = configStr.match(/"binding"\s*:\s*\{/g);
       if (bindMatches) result.tagBindings += bindMatches.length;
     }
     if (Array.isArray(node.children)) {
