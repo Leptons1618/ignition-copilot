@@ -592,7 +592,7 @@ Display:
   ia.display.icon       — material icon.  Props: path (e.g. "material/speed"), style.
   ia.display.image      — image.  Props: src, style.
   ia.display.markdown   — rich markdown.  Props: source.
-  ia.display.led-display — LED on/off indicator.  Props: color, style.
+  ia.display.led-display — LED on/off indicator.  Props: color, size (integer px diameter — use 20-30 for inline indicators; do NOT size with style.width/height).
   ia.display.progress   — progress bar.  Props: value (0-100), style.
   ia.display.thermometer — thermometer display.  Props: value, minValue, maxValue, style.
   ia.display.linear-scale — linear scale indicator.  Props: value, minValue, maxValue, style.
@@ -626,11 +626,18 @@ Symbols:
 Navigation:
   ia.navigation.link    — navigation link.  Props: text, href, style.
 
+LAYOUT & POSITION RULES:
+- Every child inside a flex container should set "position": { "basis": "<size>" } to control its size. Use "basis": "200px" for fixed, "grow": 1 for flexible.
+- For equal KPI cards: "position": { "basis": "200px", "grow": 1 }
+- For chart areas: "position": { "basis": "300px" }
+- For header rows: "position": { "basis": "60px", "shrink": 0 }
+
 STYLE RULES:
 - Use style objects: { "padding": "16px", "gap": "12px", "backgroundColor": "#f8f9fa", "borderRadius": "8px" }
 - For KPI cards use: { "flex": "1 1 200px", "padding": "16px", "backgroundColor": "#ffffff", "borderRadius": "8px", "boxShadow": "0 1px 3px rgba(0,0,0,0.08)", "textAlign": "center" }
 - For headers: { "fontSize": "22px", "fontWeight": "bold", "marginBottom": "4px" }
 - For chart containers: { "height": "300px", "backgroundColor": "#ffffff", "borderRadius": "8px", "padding": "12px" }
+- For labels, use "textStyle" for font properties: { "fontSize": 16, "fontWeight": "bold" } separately from "style" (layout/spacing).
 
 TAG BINDINGS:
 When tags are provided, add a "propConfig" sibling to "props" on the component. Each key in propConfig MUST be prefixed with "props." (scope prefix).
@@ -651,6 +658,14 @@ Example for a label bound to a tag:
 }
 IMPORTANT: Keys inside propConfig MUST start with "props." — e.g. "props.text", "props.value", "props.color". NEVER use bare keys like "text" or "value".
 — Use "props.text" for labels, "props.value" for gauges/inputs/progress, "props.color" for LEDs.
+
+TRANSFORMS (optional, add after binding):
+Format transform example (for dates):
+  "transforms": [{ "type": "format", "formatType": "datetime", "formatValue": { "date": "medium" } }]
+Script transform example (for value display):
+  "transforms": [{ "type": "script", "script": "return 'Temp: ' + str(round(value, 1)) + ' °C'" }]
+
+CRITICAL TAG RULE: Only bind to tag paths that are explicitly provided in the user message. NEVER invent, guess, or fabricate tag paths. If no suitable tag is provided for a value, use a static placeholder in props instead of a binding.
 
 COMPONENT RULES:
 - Every component MUST have: type, props, meta: { "name": "unique-kebab-name" }
@@ -759,7 +774,10 @@ router.post('/:project/generate-view', async (req, res) => {
     // Build user message
     let userMsg = `Create an Ignition Perspective view for: ${prompt}\n\nThe view path will be: ${name}`;
     if (tagList.length > 0) {
-      userMsg += `\n\nBind these tags to the relevant components:\n${tagList.map(t => `- ${t}`).join('\n')}`;
+      userMsg += `\n\nAVAILABLE TAGS — use ONLY these exact paths (do NOT invent or guess any tag paths):\n${tagList.map(t => `- ${t}`).join('\n')}`;
+      userMsg += `\nEvery tag binding MUST reference one of the paths above verbatim. If no matching tag exists for a component, use a static value instead of a binding.`;
+    } else {
+      userMsg += `\n\nNo tags were provided. Use static placeholder values in props. Do NOT add any tag bindings.`;
     }
     userMsg += `\n\nOutput ONLY the complete view.json — no markdown, no commentary.`;
 
