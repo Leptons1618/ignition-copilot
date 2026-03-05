@@ -2,9 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import {
   ChevronRight, ChevronDown, Folder, FolderOpen, Binary, Hash, Type, Calendar,
   Search, Plus, X, FilePlus2, Layers, RefreshCw, Check, Loader2, PencilLine,
-  Tag as TagIcon,
+  Tag as TagIcon, Settings2, Trash2,
 } from 'lucide-react';
-import { browseTags, readTags, searchTags, writeTags } from '../api.js';
+import { browseTags, readTags, searchTags, writeTags, createTag, updateTagConfig, deleteTags as deleteTagsApi, getTagConfig } from '../api.js';
 import Button from './ui/Button.jsx';
 import Badge from './ui/Badge.jsx';
 import Modal from './ui/Modal.jsx';
@@ -83,6 +83,7 @@ function TagTreeNode({
   editingTag, writeStatus,
   onToggleExpand, onAddWorkspaceTags,
   onStartEdit, onDoWrite, onCancelEdit, onToggleBoolean,
+  onOpenConfig, onDeleteTag,
 }) {
   const isFolder = isTagFolder(tag);
   const fullPath = parentPath === '[default]' ? `[default]/${tag.name}` : `${parentPath}/${tag.name}`;
@@ -187,6 +188,20 @@ function TagTreeNode({
                 <PencilLine size={13} />
               </button>
             )}
+            <button
+              onClick={(e) => { e.stopPropagation(); onOpenConfig?.(fullPath); }}
+              className="p-0.5 t-text-m hover:t-accent cursor-pointer"
+              title="Tag config"
+            >
+              <Settings2 size={13} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDeleteTag?.(fullPath); }}
+              className="p-0.5 t-text-m hover:t-err cursor-pointer"
+              title="Delete tag"
+            >
+              <X size={13} />
+            </button>
           </div>
         )}
       </div>
@@ -212,6 +227,8 @@ function TagTreeNode({
               onDoWrite={onDoWrite}
               onCancelEdit={onCancelEdit}
               onToggleBoolean={onToggleBoolean}
+              onOpenConfig={onOpenConfig}
+              onDeleteTag={onDeleteTag}
             />
           ))}
           {children.length === 0 && !isLoading && (
@@ -239,6 +256,19 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
   const [batchInput, setBatchInput] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  // Create tag state
+  const [showCreateTag, setShowCreateTag] = useState(false);
+  const [newTagBasePath, setNewTagBasePath] = useState('[default]DemoPlant');
+  const [newTagName, setNewTagName] = useState('');
+  const [newTagDataType, setNewTagDataType] = useState('Float4');
+  const [newTagValue, setNewTagValue] = useState('0');
+  const [createTagLoading, setCreateTagLoading] = useState(false);
+
+  // Tag config state
+  const [showTagConfig, setShowTagConfig] = useState(null);
+  const [tagConfigData, setTagConfigData] = useState(null);
+  const [tagConfigLoading, setTagConfigLoading] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -311,7 +341,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
     setWriteStatus('writing');
     try {
       const result = await writeTags([{ path: fullPath, value }]);
-      if (result.success) {
+      if (result.results?.[0]?.success !== false) {
         setWriteStatus('success');
         const readResult = await readTags([fullPath]);
         if (readResult.success !== false && readResult.results) {
@@ -362,6 +392,97 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
     setShowBatchModal(false);
   };
 
+  const handleCreateTag = async () => {
+    if (!newTagName.trim() || !newTagBasePath.trim()) return;
+    setCreateTagLoading(true);
+    try {
+      const result = await createTag(newTagBasePath.trim(), newTagName.trim(), 'AtomicTag', newTagDataType, isNaN(Number(newTagValue)) ? newTagValue : Number(newTagValue));
+      if (result.success) {
+        setShowCreateTag(false);
+        setNewTagName('');
+        setNewTagValue('0');
+        // Refresh root tags
+        const fresh = await browseTags('[default]');
+        if (fresh.success !== false) setRootTags(fresh.tags || []);
+        // Clear cached children so re-expand works
+        setChildrenMap({});
+        setExpandedPaths(new Set());
+      } else {
+        setError(result.error || 'Failed to create tag');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCreateTagLoading(false);
+    }
+  };
+
+  const handleDeleteTag = async (fullPath) => {
+    if (!window.confirm(`Delete tag "${fullPath}"?`)) return;
+    try {
+      const result = await deleteTagsApi([fullPath]);
+      if (result.results?.[0]?.success) {
+        const fresh = await browseTags('[default]');
+        if (fresh.success !== false) setRootTags(fresh.tags || []);
+        setChildrenMap({});
+        setExpandedPaths(new Set());
+      } else {
+        setError('Failed to delete tag');
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const openTagConfig = async (fullPath) => {
+    setShowTagConfig(fullPath);
+    setTagConfigLoading(true);
+    try {
+      const raw = await getTagConfig(fullPath);
+      // Normalize: real gateway wraps in { config: {...} }, mock returns flat
+      const data = raw.config || raw;
+      if (!data.name) data.name = fullPath.split('/').pop();
+      if (!data.fullPath) data.fullPath = data.path || fullPath;
+      setTagConfigData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTagConfigLoading(false);
+    }
+  };
+
+  const handleToggleHistory = async () => {
+    if (!showTagConfig || !tagConfigData) return;
+    setTagConfigLoading(true);
+    try {
+      const result = await updateTagConfig(showTagConfig, { historyEnabled: !tagConfigData.historyEnabled });
+      if (result.success) {
+        setTagConfigData(prev => ({ ...prev, historyEnabled: !prev.historyEnabled }));
+      } else {
+        setError(result.error || 'Failed to update tag config');
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTagConfigLoading(false);
+    }
+  };
+
+  const handleUpdateEngUnit = async (engUnit) => {
+    if (!showTagConfig) return;
+    setTagConfigLoading(true);
+    try {
+      const result = await updateTagConfig(showTagConfig, { engUnit });
+      if (result.success) {
+        setTagConfigData(prev => ({ ...prev, engUnit }));
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTagConfigLoading(false);
+    }
+  };
+
   const sortedRootTags = useMemo(() => {
     const folders = rootTags.filter(isTagFolder);
     const leafs = rootTags.filter(t => !isTagFolder(t));
@@ -386,6 +507,9 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
         </Button>
         <Button variant="outline" size="sm" onClick={() => setShowBatchModal(true)}>
           <Layers size={14} /> Batch Add
+        </Button>
+        <Button variant="primary" size="sm" onClick={() => setShowCreateTag(true)}>
+          <Plus size={14} /> Create Tag
         </Button>
       </div>
 
@@ -427,6 +551,8 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
                   onDoWrite={doWrite}
                   onCancelEdit={() => { setEditingTag(null); setWriteStatus(null); }}
                   onToggleBoolean={toggleBoolean}
+                  onOpenConfig={openTagConfig}
+                  onDeleteTag={handleDeleteTag}
                 />
               ))}
             </div>
@@ -458,7 +584,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
                     <button
                       onClick={() => {
                         const remaining = workspaceTags.filter(x => x !== t);
-                        onAddWorkspaceTags?.([]); // clear first, then re-add
+                        onAddWorkspaceTags?.(remaining);
                       }}
                       className="opacity-0 group-hover:opacity-100 t-text-m hover:t-err cursor-pointer transition-opacity"
                       title="Remove"
@@ -494,6 +620,154 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
               <Plus size={14} /> Add to Workspace
             </Button>
           </div>
+        </Modal>
+      )}
+
+      {showCreateTag && (
+        <Modal title="Create New Tag" onClose={() => setShowCreateTag(false)}>
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium t-text-2 mb-1">Parent Path</label>
+              <input
+                value={newTagBasePath}
+                onChange={e => setNewTagBasePath(e.target.value)}
+                placeholder="[default]DemoPlant/MotorM12"
+                className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium t-text-2 mb-1">Tag Name</label>
+              <input
+                value={newTagName}
+                onChange={e => setNewTagName(e.target.value)}
+                placeholder="e.g. Pressure"
+                className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                onKeyDown={e => e.key === 'Enter' && handleCreateTag()}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium t-text-2 mb-1">Data Type</label>
+                <select
+                  value={newTagDataType}
+                  onChange={e => setNewTagDataType(e.target.value)}
+                  className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none cursor-pointer"
+                >
+                  <option value="Float4">Float4</option>
+                  <option value="Float8">Float8</option>
+                  <option value="Int4">Int4</option>
+                  <option value="Int8">Int8</option>
+                  <option value="Boolean">Boolean</option>
+                  <option value="String">String</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium t-text-2 mb-1">Initial Value</label>
+                <input
+                  value={newTagValue}
+                  onChange={e => setNewTagValue(e.target.value)}
+                  placeholder="0"
+                  className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setShowCreateTag(false)}>Cancel</Button>
+              <Button variant="primary" size="sm" onClick={handleCreateTag} disabled={!newTagName.trim() || createTagLoading}>
+                {createTagLoading ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Create Tag
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showTagConfig && (
+        <Modal title="Tag Configuration" onClose={() => { setShowTagConfig(null); setTagConfigData(null); }}>
+          {tagConfigLoading && !tagConfigData ? (
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner label="Loading config..." />
+            </div>
+          ) : tagConfigData ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <span className="t-text-m text-xs">Name</span>
+                  <div className="font-mono font-medium t-text">{tagConfigData.name}</div>
+                </div>
+                <div>
+                  <span className="t-text-m text-xs">Data Type</span>
+                  <div className="font-mono font-medium t-text">{tagConfigData.dataType || 'N/A'}</div>
+                </div>
+                <div>
+                  <span className="t-text-m text-xs">Full Path</span>
+                  <div className="font-mono text-xs t-text-2 break-all">{tagConfigData.fullPath}</div>
+                </div>
+                <div>
+                  <span className="t-text-m text-xs">Current Value</span>
+                  <div className="font-mono font-medium t-text">
+                    {tagConfigData.value !== undefined ? String(tagConfigData.value) : 'N/A'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t t-border-s pt-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-medium t-text">History Enabled</div>
+                    <div className="text-xs t-text-m">Enable tag historian logging</div>
+                  </div>
+                  <ToggleSwitch
+                    checked={tagConfigData.historyEnabled}
+                    onChange={handleToggleHistory}
+                    disabled={tagConfigLoading}
+                  />
+                </div>
+              </div>
+
+              <div className="border-t t-border-s pt-3">
+                <label className="block text-sm font-medium t-text mb-1">Engineering Unit</label>
+                <div className="flex gap-2">
+                  <input
+                    defaultValue={tagConfigData.engUnit || ''}
+                    placeholder="e.g. RPM, °C, PSI"
+                    className="flex-1 border t-field-border rounded-lg px-3 py-1.5 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') handleUpdateEngUnit(e.target.value);
+                    }}
+                    id="engUnitInput"
+                  />
+                  <Button variant="outline" size="sm" onClick={() => {
+                    const el = document.getElementById('engUnitInput');
+                    if (el) handleUpdateEngUnit(el.value);
+                  }}>
+                    <Check size={14} /> Set
+                  </Button>
+                </div>
+              </div>
+
+              {tagConfigData.alarms?.length > 0 && (
+                <div className="border-t t-border-s pt-3">
+                  <div className="text-sm font-medium t-text mb-2">Alarms</div>
+                  {tagConfigData.alarms.map((alarm, i) => (
+                    <div key={i} className="flex items-center gap-2 text-xs t-bg-alt p-2 rounded mb-1">
+                      <span className="font-medium t-text">{alarm.name}</span>
+                      <span className="t-text-m">{alarm.mode}</span>
+                      <span className="t-text-m">@ {alarm.setpointA}</span>
+                      <Badge color={alarm.priority === 'High' ? 'danger' : alarm.priority === 'Medium' ? 'warning' : 'neutral'}>{alarm.priority}</Badge>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2">
+                <Button variant="outline" size="sm" onClick={() => { setShowTagConfig(null); setTagConfigData(null); }}>
+                  Close
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm t-text-m py-4 text-center">Failed to load configuration</div>
+          )}
         </Modal>
       )}
     </div>

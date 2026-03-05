@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { readdir, readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, relative, sep, dirname } from 'path';
+import { createHash } from 'crypto';
 import { chat as llmChat } from '../services/ollama.js';
 
 const router = Router();
@@ -31,7 +32,42 @@ const PERSPECTIVE_MODULE = 'com.inductiveautomation.perspective';
 const VISION_MODULE = 'com.inductiveautomation.vision';
 const IGNITION_CORE = 'ignition';
 
+/** Ignition can't parse ISO timestamps with milliseconds — strip them. */
+function ignitionTimestamp() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+
 // ─── Helpers ─────────────────────────────────────────────
+
+/**
+ * Notify the Ignition Gateway that a project resource has changed.
+ * Touches project.json to trigger the file watcher and calls requestProjectScan.
+ */
+async function notifyProjectChanged(projectName) {
+  try {
+    const projectJsonPath = join(PROJECTS_DIR, projectName, 'project.json');
+    const meta = await readJsonSafe(projectJsonPath);
+    if (meta) {
+      meta.lastModified = ignitionTimestamp();
+      await writeFile(projectJsonPath, JSON.stringify(meta, null, 2), 'utf-8');
+      console.log(`[projects] Notified Gateway — touched project.json for ${projectName}`);
+    }
+  } catch (err) {
+    console.warn(`[projects] Could not touch project.json: ${err.message}`);
+  }
+  // Trigger Gateway project scan via WebDev GET endpoint (calls system.util.requestProjectScan inside Gateway)
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    await fetch(`${GATEWAY_URL}/system/webdev/${projectName}/project_scan`, {
+      signal: controller.signal,
+    }).then(r => {
+      if (r.ok) console.log(`[projects] Triggered requestProjectScan via WebDev`);
+      else console.warn(`[projects] WebDev project_scan returned ${r.status}`);
+    }).catch(() => null);
+    clearTimeout(timer);
+  } catch {}
+}
 
 function safePath(base, ...segments) {
   const resolved = join(base, ...segments);
@@ -69,6 +105,71 @@ async function readJsonSafe(filePath) {
 async function writeJsonSafe(filePath, data) {
   await mkdir(dirname(filePath), { recursive: true });
   await writeFile(filePath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/**
+ * Register a view in the Perspective page-config so it gets a routable URL.
+ * Adds an entry like: { "/ViewPath": { "viewPath": "ViewPath" } }
+ */
+async function registerPageRoute(projectName, viewPath) {
+  try {
+    const configPath = safePath(PROJECTS_DIR, projectName, PERSPECTIVE_MODULE, 'page-config', 'config.json');
+    const config = await readJsonSafe(configPath) || { pages: {}, sharedDocks: { cornerPriority: 'top-bottom' } };
+    if (!config.pages) config.pages = {};
+    const urlKey = '/' + viewPath;
+    if (!config.pages[urlKey]) {
+      config.pages[urlKey] = { viewPath };
+      await writeJsonSafe(configPath, config);
+      await touchResourceJson(join(dirname(configPath), 'resource.json'));
+      console.log(`[projects] Registered page route ${urlKey} → ${viewPath}`);
+    }
+  } catch (err) {
+    console.warn(`[projects] Could not register page route: ${err.message}`);
+  }
+}
+
+/**
+ * Unregister a view from the Perspective page-config.
+ */
+async function unregisterPageRoute(projectName, viewPath) {
+  try {
+    const configPath = safePath(PROJECTS_DIR, projectName, PERSPECTIVE_MODULE, 'page-config', 'config.json');
+    const config = await readJsonSafe(configPath);
+    if (!config?.pages) return;
+    const urlKey = '/' + viewPath;
+    if (config.pages[urlKey]) {
+      delete config.pages[urlKey];
+      await writeJsonSafe(configPath, config);
+      await touchResourceJson(join(dirname(configPath), 'resource.json'));
+      console.log(`[projects] Unregistered page route ${urlKey}`);
+    }
+  } catch (err) {
+    console.warn(`[projects] Could not unregister page route: ${err.message}`);
+  }
+}
+
+/**
+ * Touch a resource.json — update timestamp and generate a lastModificationSignature
+ * so the Gateway's file-change detection picks up the change.
+ */
+async function touchResourceJson(resourcePath) {
+  try {
+    const meta = await readJsonSafe(resourcePath);
+    if (!meta) return;
+    meta.attributes = meta.attributes || {};
+    meta.attributes.lastModification = { actor: 'copilot', timestamp: ignitionTimestamp() };
+    // Generate a signature from the sibling data files so the Gateway sees a change
+    const dir = dirname(resourcePath);
+    const files = meta.files || [];
+    let content = '';
+    for (const f of files) {
+      try { content += await readFile(join(dir, f), 'utf-8'); } catch {}
+    }
+    if (content) {
+      meta.attributes.lastModificationSignature = createHash('sha256').update(content).digest('hex');
+    }
+    await writeJsonSafe(resourcePath, meta);
+  } catch {}
 }
 
 /** Recursively list Perspective views */
@@ -354,8 +455,9 @@ router.put('/:project/view', async (req, res) => {
     const resourcePath = join(viewDir, 'resource.json');
     const meta = await readJsonSafe(resourcePath) || { scope: 'G', version: 1, restricted: false, overridable: true, files: ['view.json'] };
     meta.attributes = meta.attributes || {};
-    meta.attributes.lastModification = { actor: 'copilot', timestamp: new Date().toISOString() };
+    meta.attributes.lastModification = { actor: 'copilot', timestamp: ignitionTimestamp() };
     await writeJsonSafe(resourcePath, meta);
+    await notifyProjectChanged(req.params.project);
     console.log(`[projects] Updated view ${viewPath} in ${req.params.project}`);
     res.json({ success: true, message: 'View updated' });
   } catch (err) {
@@ -374,11 +476,18 @@ router.post('/:project/views', async (req, res) => {
     if (await dirExists(viewDir)) return res.status(409).json({ success: false, error: 'View already exists' });
     await mkdir(viewDir, { recursive: true });
     const templateFn = VIEW_TEMPLATES[template] || VIEW_TEMPLATES.blank;
-    await writeJsonSafe(join(viewDir, 'view.json'), templateFn());
+    const viewJson = templateFn();
+    const viewStr = JSON.stringify(viewJson, null, 2);
+    await writeJsonSafe(join(viewDir, 'view.json'), viewJson);
     await writeJsonSafe(join(viewDir, 'resource.json'), {
       scope: 'G', version: 1, restricted: false, overridable: true, files: ['view.json'],
-      attributes: { lastModification: { actor: 'copilot', timestamp: new Date().toISOString() } },
+      attributes: {
+        lastModification: { actor: 'copilot', timestamp: ignitionTimestamp() },
+        lastModificationSignature: createHash('sha256').update(viewStr).digest('hex'),
+      },
     });
+    await registerPageRoute(req.params.project, sanitized);
+    await notifyProjectChanged(req.params.project);
     console.log(`[projects] Created view ${sanitized} in ${req.params.project}`);
     res.json({ success: true, name: sanitized, message: 'View created' });
   } catch (err) {
@@ -394,6 +503,8 @@ router.delete('/:project/view', async (req, res) => {
     const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', viewPath);
     if (!await dirExists(viewDir)) return res.status(404).json({ success: false, error: 'View not found' });
     await rm(viewDir, { recursive: true, force: true });
+    await unregisterPageRoute(req.params.project, viewPath);
+    await notifyProjectChanged(req.params.project);
     console.log(`[projects] Deleted view ${viewPath} from ${req.params.project}`);
     res.json({ success: true, message: 'View deleted' });
   } catch (err) {
@@ -471,36 +582,46 @@ Generate a complete Ignition Perspective view.json structure following this EXAC
   }
 }
 
-AVAILABLE COMPONENT TYPES:
+AVAILABLE COMPONENT TYPES (use ONLY these exact type identifiers):
 Containers:
-  ia.container.flex     — flexbox (direction, justify, align, wrap, gap).  Always wrap children.
-  ia.container.coord    — absolute-positioned children.
+  ia.container.flex     — flexbox layout.  Props: direction, justify, alignItems, wrap, style (with gap).
+  ia.container.column   — column layout container.
 
 Display:
   ia.display.label      — text label.  Props: text, style.
-  ia.display.icon       — icon.  Props: path (material icon name), style.
+  ia.display.icon       — material icon.  Props: path (e.g. "material/speed"), style.
   ia.display.image      — image.  Props: src, style.
   ia.display.markdown   — rich markdown.  Props: source.
-  ia.display.gauge      — semicircular gauge.  Props: value, min, max, style.
-  ia.display.led        — LED indicator.  Props: color, style.
-  ia.display.progress-bar — bar.  Props: value (0-100), style.
+  ia.display.led-display — LED on/off indicator.  Props: color, style.
+  ia.display.progress   — progress bar.  Props: value (0-100), style.
+  ia.display.thermometer — thermometer display.  Props: value, minValue, maxValue, style.
+  ia.display.linear-scale — linear scale indicator.  Props: value, minValue, maxValue, style.
+  ia.display.sparkline  — inline mini-chart.  Props: data, style.
+  ia.display.table      — data table.  Props: data, columns, style.
+  ia.display.alarmstatustable — active alarms table.  Props: style.
+  ia.display.alarmjournaltable — alarm history table.  Props: style.
 
 Input:
   ia.input.text-field   — text input.  Props: value, placeholder.
-  ia.input.numeric-field — number input.  Props: value, min, max.
+  ia.input.numeric-entry-field — number input.  Props: value, min, max.
   ia.input.dropdown     — dropdown.  Props: options, value.
   ia.input.toggle-switch — toggle.  Props: value (boolean).
   ia.input.button       — button.  Props: text, style.
+  ia.input.slider       — slider.  Props: value, min, max, step.
 
 Charts:
-  ia.chart.easy-chart   — time-series trend chart.  Props: tag paths, style.
+  ia.chart.timeseries   — time-series trend chart with pens for tag history.  Props: pens, style.
+  ia.chart.powerchart   — full-featured historical trend chart.  Props: pens, style.
+  ia.chart.xy           — XY chart for custom data/series.  Props: series, xAxes, yAxes, style.
   ia.chart.pie          — pie chart.  Props: data, style.
-  ia.chart.bar          — bar chart.  Props: data, style.
+  ia.chart.gauge        — full gauge (arc or needle).  Props: value, minValue, maxValue, style.
+  ia.chart.simple-gauge — simple arc gauge.  Props: value, minValue, maxValue, style.
 
-Tables:
-  ia.display.table      — data table.  Props: data, columns.
-  ia.alarm.status-table — active alarms.  Props: style.
-  ia.alarm.journal-table — alarm history.  Props: style.
+Symbols:
+  ia.symbol.motor       — animated motor symbol.  Props: state (running/stopped/faulted), style.
+  ia.symbol.pump        — animated pump symbol.  Props: state, style.
+  ia.symbol.valve       — animated valve symbol.  Props: state, style.
+  ia.symbol.sensor      — sensor symbol.  Props: state, style.
 
 Navigation:
   ia.navigation.link    — navigation link.  Props: text, href, style.
@@ -512,18 +633,24 @@ STYLE RULES:
 - For chart containers: { "height": "300px", "backgroundColor": "#ffffff", "borderRadius": "8px", "padding": "12px" }
 
 TAG BINDINGS:
-When tags are provided, bind them to component props using this exact structure:
+When tags are provided, add a "propConfig" sibling to "props" on the component. Each key in propConfig MUST be prefixed with "props." (scope prefix).
+Example for a label bound to a tag:
 {
-  "value": {
-    "binding": {
-      "type": "tag",
-      "config": {
-        "path": "[default]DemoPlant/MotorM12/Speed"
+  "type": "ia.display.label",
+  "meta": { "name": "speed-value" },
+  "position": {},
+  "props": { "text": "" },
+  "propConfig": {
+    "props.text": {
+      "binding": {
+        "type": "tag",
+        "config": { "path": "[default]DemoPlant/MotorM12/Speed" }
       }
     }
   }
 }
-— Use "text" prop for labels, "value" prop for gauges/inputs/LEDs.
+IMPORTANT: Keys inside propConfig MUST start with "props." — e.g. "props.text", "props.value", "props.color". NEVER use bare keys like "text" or "value".
+— Use "props.text" for labels, "props.value" for gauges/inputs/progress, "props.color" for LEDs.
 
 COMPONENT RULES:
 - Every component MUST have: type, props, meta: { "name": "unique-kebab-name" }
@@ -587,10 +714,29 @@ function validateViewJson(content) {
   return result;
 }
 
+/**
+ * Fix propConfig keys that lack the required "props." scope prefix.
+ * Ignition's PropertyConfigCollection requires scoped keys like "props.text".
+ * LLMs often produce bare keys like "text" — this auto-fixes them in-place.
+ */
+function fixPropConfigScopes(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.propConfig && typeof node.propConfig === 'object') {
+    const fixed = {};
+    for (const [key, val] of Object.entries(node.propConfig)) {
+      fixed[key.includes('.') ? key : `props.${key}`] = val;
+    }
+    node.propConfig = fixed;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) fixPropConfigScopes(child);
+  }
+}
+
 /** Generate a view using the configured LLM */
 router.post('/:project/generate-view', async (req, res) => {
   try {
-    const { name, prompt, tags } = req.body;
+    const { name, prompt, tags, model } = req.body;
     if (!name || !prompt) {
       return res.status(400).json({ success: false, error: 'name and prompt are required' });
     }
@@ -618,12 +764,14 @@ router.post('/:project/generate-view', async (req, res) => {
     userMsg += `\n\nOutput ONLY the complete view.json — no markdown, no commentary.`;
 
     // Call the LLM
+    const llmOpts = { maxIterations: 1, enableRagContext: false, noTools: true, numPredict: 4096 };
+    if (model) llmOpts.model = model;
     const result = await llmChat(
       [
         { role: 'system', content: VIEW_GEN_SYSTEM },
         { role: 'user', content: userMsg },
       ],
-      { maxIterations: 1, enableRagContext: false, noTools: true, numPredict: 4096 }
+      llmOpts
     );
 
     // Extract JSON from the response
@@ -654,6 +802,9 @@ router.post('/:project/generate-view', async (req, res) => {
       });
     }
 
+    // Auto-fix propConfig keys missing "props." scope prefix
+    if (viewContent.root) fixPropConfigScopes(viewContent.root);
+
     // Write the view to disk
     let savedToDisk = false;
     try {
@@ -661,6 +812,7 @@ router.post('/:project/generate-view', async (req, res) => {
       await writeJsonSafe(join(viewDir, 'view.json'), viewContent);
 
       // Create resource.json metadata
+      const viewStr = JSON.stringify(viewContent, null, 2);
       const resourceMeta = {
         scope: 'G',
         version: 1,
@@ -670,12 +822,15 @@ router.post('/:project/generate-view', async (req, res) => {
         attributes: {
           lastModification: {
             actor: 'copilot-ai',
-            timestamp: new Date().toISOString(),
+            timestamp: ignitionTimestamp(),
           },
+          lastModificationSignature: createHash('sha256').update(viewStr).digest('hex'),
         },
       };
       await writeJsonSafe(join(viewDir, 'resource.json'), resourceMeta);
       savedToDisk = true;
+      await registerPageRoute(req.params.project, name);
+      await notifyProjectChanged(req.params.project);
     } catch (writeErr) {
       console.warn(`[projects] Could not write to Ignition dir (${writeErr.code || writeErr.message}), view returned in response only`);
     }
@@ -695,6 +850,191 @@ router.post('/:project/generate-view', async (req, res) => {
     });
   } catch (err) {
     console.error('[projects] View generation error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Duplicate View ──────────────────────────────────────
+
+router.post('/:project/duplicate-view', async (req, res) => {
+  try {
+    const { sourcePath, newName } = req.body;
+    if (!sourcePath || !newName?.trim()) return res.status(400).json({ success: false, error: 'sourcePath and newName are required' });
+
+    const sanitized = newName.trim().replace(/[^a-zA-Z0-9_/\-]/g, '');
+    if (!sanitized) return res.status(400).json({ success: false, error: 'Invalid view name' });
+
+    const sourceDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', sourcePath);
+    if (!await dirExists(sourceDir)) return res.status(404).json({ success: false, error: 'Source view not found' });
+
+    const destDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', sanitized);
+    if (await dirExists(destDir)) return res.status(409).json({ success: false, error: 'Destination view already exists' });
+
+    await mkdir(destDir, { recursive: true });
+
+    // Copy view.json
+    const viewContent = await readJsonSafe(join(sourceDir, 'view.json'));
+    if (viewContent) await writeJsonSafe(join(destDir, 'view.json'), viewContent);
+
+    // Create fresh resource.json
+    const dupStr = JSON.stringify(viewContent, null, 2);
+    await writeJsonSafe(join(destDir, 'resource.json'), {
+      scope: 'G', version: 1, restricted: false, overridable: true, files: ['view.json'],
+      attributes: {
+        lastModification: { actor: 'copilot', timestamp: ignitionTimestamp() },
+        lastModificationSignature: createHash('sha256').update(dupStr).digest('hex'),
+      },
+    });
+
+    await registerPageRoute(req.params.project, sanitized);
+    await notifyProjectChanged(req.params.project);
+    console.log(`[projects] Duplicated view ${sourcePath} → ${sanitized} in ${req.params.project}`);
+    res.json({ success: true, name: sanitized, message: 'View duplicated' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Rename / Move View ──────────────────────────────────
+
+router.post('/:project/rename-view', async (req, res) => {
+  try {
+    const { sourcePath, newName } = req.body;
+    if (!sourcePath || !newName?.trim()) return res.status(400).json({ success: false, error: 'sourcePath and newName are required' });
+
+    const sanitized = newName.trim().replace(/[^a-zA-Z0-9_/\-]/g, '');
+    if (!sanitized) return res.status(400).json({ success: false, error: 'Invalid view name' });
+
+    const sourceDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', sourcePath);
+    if (!await dirExists(sourceDir)) return res.status(404).json({ success: false, error: 'Source view not found' });
+
+    const destDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', sanitized);
+    if (await dirExists(destDir)) return res.status(409).json({ success: false, error: 'Destination view already exists' });
+
+    // Ensure parent directory exists
+    await mkdir(dirname(destDir), { recursive: true });
+
+    // Move via copy + delete (cross-device safe)
+    const viewContent = await readJsonSafe(join(sourceDir, 'view.json'));
+    const resourceContent = await readJsonSafe(join(sourceDir, 'resource.json'));
+
+    await mkdir(destDir, { recursive: true });
+    if (viewContent) await writeJsonSafe(join(destDir, 'view.json'), viewContent);
+    if (resourceContent) {
+      resourceContent.attributes = resourceContent.attributes || {};
+      resourceContent.attributes.lastModification = { actor: 'copilot', timestamp: ignitionTimestamp() };
+      await writeJsonSafe(join(destDir, 'resource.json'), resourceContent);
+    }
+
+    await rm(sourceDir, { recursive: true, force: true });
+
+    await unregisterPageRoute(req.params.project, sourcePath);
+    await registerPageRoute(req.params.project, sanitized);
+    await notifyProjectChanged(req.params.project);
+    console.log(`[projects] Renamed view ${sourcePath} → ${sanitized} in ${req.params.project}`);
+    res.json({ success: true, name: sanitized, message: 'View renamed' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Request Project Scan ────────────────────────────────
+
+router.post('/:project/scan', async (req, res) => {
+  try {
+    const projectDir = safePath(PROJECTS_DIR, req.params.project);
+    if (!await dirExists(projectDir)) return res.status(404).json({ success: false, error: 'Project not found' });
+
+    await notifyProjectChanged(req.params.project);
+
+    // Also try the Gateway's internal scan endpoint (Ignition 8.1+)
+    let gatewayNotified = false;
+    try {
+      const scanUrl = `${GATEWAY_URL}/data/status/requestProjectScan`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      const scanRes = await fetch(scanUrl, { method: 'POST', signal: controller.signal }).catch(() => null);
+      clearTimeout(timer);
+      if (scanRes?.ok) gatewayNotified = true;
+    } catch {}
+
+    res.json({
+      success: true,
+      message: 'Project scan requested. Changes should appear in Perspective within a few seconds.',
+      gatewayNotified,
+      perspectiveUrl: `${GATEWAY_URL}/data/perspective/client/${req.params.project}`,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Export View JSON ────────────────────────────────────
+
+router.get('/:project/export-view', async (req, res) => {
+  try {
+    const viewPath = req.query.path;
+    if (!viewPath) return res.status(400).json({ success: false, error: 'path query required' });
+
+    const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', viewPath);
+    if (!await dirExists(viewDir)) return res.status(404).json({ success: false, error: 'View not found' });
+
+    const content = await readJsonSafe(join(viewDir, 'view.json'));
+    const meta = await readJsonSafe(join(viewDir, 'resource.json'));
+
+    const exportData = {
+      exportedAt: ignitionTimestamp(),
+      exportedBy: 'copilot',
+      project: req.params.project,
+      viewPath,
+      resource: meta,
+      view: content,
+    };
+
+    res.setHeader('Content-Disposition', `attachment; filename="${viewPath.replace(/\//g, '_')}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json(exportData);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Import View JSON ────────────────────────────────────
+
+router.post('/:project/import-view', async (req, res) => {
+  try {
+    const { name, view } = req.body;
+    if (!name?.trim() || !view) return res.status(400).json({ success: false, error: 'name and view are required' });
+
+    const sanitized = name.trim().replace(/[^a-zA-Z0-9_/\-]/g, '');
+    if (!sanitized) return res.status(400).json({ success: false, error: 'Invalid view name' });
+
+    // Accept either a raw view or an export bundle
+    const viewContent = view.view || view;
+    const validation = validateViewJson(viewContent);
+    if (!validation.valid) {
+      return res.status(422).json({ success: false, error: `Invalid view: ${validation.errors.join(', ')}` });
+    }
+
+    const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', sanitized);
+    if (await dirExists(viewDir)) return res.status(409).json({ success: false, error: 'View already exists' });
+
+    await mkdir(viewDir, { recursive: true });
+    await writeJsonSafe(join(viewDir, 'view.json'), viewContent);
+    const impStr = JSON.stringify(viewContent, null, 2);
+    await writeJsonSafe(join(viewDir, 'resource.json'), {
+      scope: 'G', version: 1, restricted: false, overridable: true, files: ['view.json'],
+      attributes: {
+        lastModification: { actor: 'copilot', timestamp: ignitionTimestamp() },
+        lastModificationSignature: createHash('sha256').update(impStr).digest('hex'),
+      },
+    });
+
+    await registerPageRoute(req.params.project, sanitized);
+    await notifyProjectChanged(req.params.project);
+    console.log(`[projects] Imported view ${sanitized} into ${req.params.project}`);
+    res.json({ success: true, name: sanitized, validation, message: 'View imported' });
+  } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -290,11 +290,46 @@ export async function createTag(basePath, name, tagType = 'AtomicTag', dataType 
   return { success: true, path: full };
 }
 
+export async function updateTagConfig(path, config = {}) {
+  const p = resolvePath(path);
+  const tag = TAGS[p];
+  if (!tag) return { success: false, error: 'Tag not found' };
+
+  // Update allowed properties
+  if (config.historyEnabled !== undefined) {
+    tag.historyEnabled = Boolean(config.historyEnabled);
+    // If enabling history and no _gen data, add default generator so queryHistory works
+    if (tag.historyEnabled && !tag._gen && tag.tagType === 'AtomicTag') {
+      const numVal = typeof (liveValues[p] ?? tag.value) === 'number' ? (liveValues[p] ?? tag.value) : 0;
+      tag._gen = { base: numVal || 0, noise: Math.max(1, Math.abs(numVal) * 0.05), drift: 0 };
+    }
+  }
+  if (config.engUnit !== undefined) tag.engUnit = config.engUnit;
+  if (config.alarms !== undefined) tag.alarms = config.alarms;
+  if (config.dataType !== undefined) tag.dataType = config.dataType;
+
+  return {
+    success: true,
+    path: p,
+    config: {
+      name: tag.name, fullPath: p, tagType: tag.tagType, dataType: tag.dataType,
+      value: liveValues[p] ?? tag.value, engUnit: tag.engUnit || null,
+      historyEnabled: tag.historyEnabled || false, alarms: tag.alarms || [],
+    },
+  };
+}
+
 export async function deleteTags(paths) {
   const results = [];
   for (const raw of paths || []) {
     const p = resolvePath(raw);
     if (TAGS[p]) {
+      // Clean up parent's children array
+      for (const [, tag] of Object.entries(TAGS)) {
+        if (tag.children && tag.children.includes(p)) {
+          tag.children = tag.children.filter(c => c !== p);
+        }
+      }
       delete TAGS[p];
       delete liveValues[p];
       results.push({ path: p, success: true });
@@ -404,6 +439,7 @@ export default {
   searchTags,
   getTagConfig,
   createTag,
+  updateTagConfig,
   deleteTags,
   queryHistory,
   getActiveAlarms,

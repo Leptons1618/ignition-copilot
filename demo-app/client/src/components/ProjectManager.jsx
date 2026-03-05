@@ -3,7 +3,7 @@ import {
   FolderOpen, FileJson, ChevronRight, ChevronDown, Plus, Save, Trash2, RefreshCw,
   Settings2, ExternalLink, Eye, Code, Layers, AlertTriangle, FolderTree, Search,
   X, Check, Layout, BarChart3, Bell, Navigation, FileCode, Database, Copy,
-  Wand2, Loader2, CheckCircle2, Monitor,
+  Wand2, Loader2, CheckCircle2, Monitor, Download, Upload, Edit3, Globe,
 } from 'lucide-react';
 import { useNotifications } from '../lib/notifications.jsx';
 
@@ -107,9 +107,9 @@ function ViewPreview({ viewContent }) {
 
   const pageConfig = viewContent.custom?.pageConfig;
   return (
-    <div className="h-full overflow-auto bg-[#e8eaed] dark:bg-[#1a1a2e]">
+    <div className="h-full flex flex-col bg-[#e8eaed] dark:bg-[#1a1a2e]">
       {/* Simulated browser chrome */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-[#2a2a3e] border-b border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-2 text-xs">
+      <div className="shrink-0 bg-white dark:bg-[#2a2a3e] border-b border-gray-200 dark:border-gray-700 px-3 py-1.5 flex items-center gap-2 text-xs">
         <div className="flex gap-1">
           <span className="w-2.5 h-2.5 rounded-full bg-red-400" />
           <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
@@ -121,9 +121,9 @@ function ViewPreview({ viewContent }) {
         {pageConfig?.title && <span className="text-gray-600 dark:text-gray-300 font-medium">{pageConfig.title}</span>}
       </div>
 
-      {/* View canvas */}
-      <div className="p-4">
-        <div className="bg-white dark:bg-[#22223a] rounded-lg shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700" style={{ minHeight: 400 }}>
+      {/* View canvas - fills remaining space */}
+      <div className="flex-1 overflow-auto p-4">
+        <div className="bg-white dark:bg-[#22223a] rounded-lg shadow-lg overflow-hidden border border-gray-200 dark:border-gray-700 min-h-full">
           <PreviewNode node={viewContent.root} />
         </div>
       </div>
@@ -542,6 +542,9 @@ function AIViewGenerator({ project, onCreated, onClose }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [activePreset, setActivePreset] = useState(null);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState('');
+  const [chatConfig, setChatConfig] = useState(null);
   const notifications = useNotifications();
 
   // Load available tags
@@ -552,6 +555,19 @@ function AIViewGenerator({ project, onCreated, onClose }) {
         const tags = (d.results || d.tags || []);
         const flat = flattenTags(tags);
         setAvailableTags(flat);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Load available models & current config
+  useEffect(() => {
+    fetch('/api/chat/models').then(r => r.json())
+      .then(d => setAvailableModels(d.models || []))
+      .catch(() => {});
+    fetch('/api/chat/config').then(r => r.json())
+      .then(cfg => {
+        setChatConfig(cfg);
+        setSelectedModel(cfg.defaultModel || '');
       })
       .catch(() => {});
   }, []);
@@ -606,6 +622,7 @@ function AIViewGenerator({ project, onCreated, onClose }) {
           name: viewName.trim(),
           prompt: buildFullPrompt(),
           tags: selectedTags,
+          model: selectedModel || undefined,
         }),
       });
       setResult(data);
@@ -668,6 +685,43 @@ function AIViewGenerator({ project, onCreated, onClose }) {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Model selector */}
+              <div>
+                <label className="block text-xs font-semibold t-text-2 uppercase mb-1.5">AI Model</label>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedModel}
+                    onChange={e => setSelectedModel(e.target.value)}
+                    className="flex-1 border t-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                  >
+                    {chatConfig?.llmProvider && chatConfig.llmProvider !== 'ollama' && (
+                      <option value="">
+                        {chatConfig.llmProvider === 'openai' ? `OpenAI: ${chatConfig.openaiModel || 'gpt-4o'}` :
+                         chatConfig.llmProvider === 'copilot' ? `Copilot: ${chatConfig.copilotModel || 'gpt-4o'}` :
+                         chatConfig.llmProvider === 'custom' ? `Custom: ${chatConfig.customModel || 'default'}` : 'Default'}
+                      </option>
+                    )}
+                    {availableModels.filter(m => !m.name.includes('embed')).map(m => (
+                      <option key={m.name} value={m.name}>
+                        {m.name} {m.size > 1000 ? `(${(m.size / 1e9).toFixed(1)}GB)` : m.family ? `(${m.family})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => fetch('/api/chat/models').then(r => r.json()).then(d => setAvailableModels(d.models || []))}
+                    className="px-2 py-2 border t-border rounded-lg t-text-m hover:t-text-2 hover:t-surface-h transition-colors cursor-pointer"
+                    title="Refresh models"
+                  >
+                    <RefreshCw size={14} />
+                  </button>
+                </div>
+                {selectedModel && availableModels.find(m => m.name === selectedModel)?.size > 1000 && (
+                  <div className="text-[10px] t-text-m mt-1">
+                    Local model — {(availableModels.find(m => m.name === selectedModel).size / 1e9).toFixed(1)}GB
+                  </div>
+                )}
               </div>
 
               {/* View name */}
@@ -816,6 +870,127 @@ function AIViewGenerator({ project, onCreated, onClose }) {
   );
 }
 
+// ─── Simple Input Modal ──────────────────────────────────
+
+function SimpleInputModal({ title, label, placeholder, value, onChange, onSubmit, onClose, submitLabel, submitIcon: Icon }) {
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="t-surface rounded-xl t-shadow-lg border t-border-s max-w-md w-full p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold t-text">{title}</h3>
+          <button onClick={onClose} className="t-text-m hover:t-text-2 cursor-pointer"><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium t-text-2 mb-1">{label}</label>
+            <input
+              value={value}
+              onChange={e => onChange(e.target.value)}
+              placeholder={placeholder}
+              className="w-full border t-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+              onKeyDown={e => e.key === 'Enter' && onSubmit()}
+              autoFocus
+            />
+          </div>
+          <button
+            onClick={onSubmit}
+            disabled={!value?.trim()}
+            className="w-full t-accent-bg text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            {Icon && <Icon size={14} />} {submitLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Import View Modal ───────────────────────────────────
+
+function ImportViewModal({ onImport, onClose }) {
+  const [viewName, setViewName] = useState('');
+  const [jsonText, setJsonText] = useState('');
+  const [parseError, setParseError] = useState(null);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target.result;
+      setJsonText(text);
+      try {
+        JSON.parse(text);
+        setParseError(null);
+        if (!viewName) {
+          const name = file.name.replace('.json', '').replace(/_/g, '/');
+          setViewName(name);
+        }
+      } catch (err) {
+        setParseError(err.message);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleSubmit = () => {
+    try {
+      const parsed = JSON.parse(jsonText);
+      onImport(viewName, parsed);
+    } catch (err) {
+      setParseError(err.message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="t-surface rounded-xl t-shadow-lg border t-border-s max-w-lg w-full p-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold t-text">Import View</h3>
+          <button onClick={onClose} className="t-text-m hover:t-text-2 cursor-pointer"><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium t-text-2 mb-1">View Path / Name</label>
+            <input
+              value={viewName}
+              onChange={e => setViewName(e.target.value)}
+              placeholder="e.g. Pages/ImportedView"
+              className="w-full border t-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium t-text-2 mb-1">Upload JSON file or paste JSON</label>
+            <input type="file" accept=".json" onChange={handleFileUpload} className="text-sm t-text-m mb-2" />
+            <textarea
+              value={jsonText}
+              onChange={e => {
+                setJsonText(e.target.value);
+                try { JSON.parse(e.target.value); setParseError(null); } catch (err) { setParseError(err.message); }
+              }}
+              placeholder='{"root": { "type": "ia.container.flex", ... }}'
+              rows={6}
+              className="w-full border t-border rounded-lg px-3 py-2 text-xs font-mono t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] resize-none"
+            />
+          </div>
+          {parseError && (
+            <div className="flex items-start gap-2 p-2 t-err-soft border t-err-border rounded-lg text-xs t-err">
+              <AlertTriangle size={12} className="shrink-0 mt-0.5" /><span>{parseError}</span>
+            </div>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={!viewName.trim() || !jsonText.trim() || !!parseError}
+            className="w-full t-accent-bg text-white rounded-lg px-4 py-2.5 text-sm font-medium hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <Upload size={14} /> Import View
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────
 
 export default function ProjectManager() {
@@ -835,6 +1010,9 @@ export default function ProjectManager() {
   const [showSettings, setShowSettings] = useState(false);
   const [showCreateView, setShowCreateView] = useState(false);
   const [showAIGenerator, setShowAIGenerator] = useState(false);
+  const [showDuplicateView, setShowDuplicateView] = useState(false);
+  const [showRenameView, setShowRenameView] = useState(false);
+  const [showImportView, setShowImportView] = useState(false);
   const [newViewName, setNewViewName] = useState('');
   const [newViewTemplate, setNewViewTemplate] = useState('blank');
   const [loading, setLoading] = useState(true);
@@ -952,6 +1130,7 @@ export default function ProjectManager() {
 
   const deleteView = useCallback(async () => {
     if (!selectedView || !selectedProject) return;
+    if (!window.confirm(`Delete view "${selectedView}"? This cannot be undone.`)) return;
     try {
       await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/view?path=${encodeURIComponent(selectedView)}`, { method: 'DELETE' });
       notifications.success('View deleted');
@@ -996,6 +1175,82 @@ export default function ProjectManager() {
     setSelectedNode(node);
     setSelectedNodePath(path);
   }, []);
+
+  const duplicateView = useCallback(async () => {
+    if (!selectedView || !selectedProject || !newViewName.trim()) return;
+    try {
+      await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/duplicate-view`, {
+        method: 'POST',
+        body: JSON.stringify({ sourcePath: selectedView, newName: newViewName.trim() }),
+      });
+      notifications.success(`View duplicated as "${newViewName}"`);
+      setShowDuplicateView(false);
+      setNewViewName('');
+      await selectProject(selectedProject);
+    } catch (err) {
+      notifications.error(`Duplicate failed: ${err.message}`);
+    }
+  }, [selectedView, selectedProject, newViewName, selectProject]);
+
+  const renameView = useCallback(async () => {
+    if (!selectedView || !selectedProject || !newViewName.trim()) return;
+    try {
+      const data = await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/rename-view`, {
+        method: 'POST',
+        body: JSON.stringify({ sourcePath: selectedView, newName: newViewName.trim() }),
+      });
+      notifications.success(`View renamed to "${data.name}"`);
+      setShowRenameView(false);
+      setSelectedView(data.name);
+      setNewViewName('');
+      await selectProject(selectedProject);
+    } catch (err) {
+      notifications.error(`Rename failed: ${err.message}`);
+    }
+  }, [selectedView, selectedProject, newViewName, selectProject]);
+
+  const exportView = useCallback(async () => {
+    if (!selectedView || !selectedProject) return;
+    try {
+      const res = await fetch(`${API}/${encodeURIComponent(selectedProject)}/export-view?path=${encodeURIComponent(selectedView)}`);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${selectedView.replace(/\//g, '_')}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      notifications.success('View exported');
+    } catch (err) {
+      notifications.error(`Export failed: ${err.message}`);
+    }
+  }, [selectedView, selectedProject]);
+
+  const importView = useCallback(async (name, viewJson) => {
+    if (!selectedProject || !name?.trim()) return;
+    try {
+      await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/import-view`, {
+        method: 'POST',
+        body: JSON.stringify({ name: name.trim(), view: viewJson }),
+      });
+      notifications.success(`View "${name}" imported`);
+      setShowImportView(false);
+      await selectProject(selectedProject);
+    } catch (err) {
+      notifications.error(`Import failed: ${err.message}`);
+    }
+  }, [selectedProject, selectProject]);
+
+  const requestScan = useCallback(async () => {
+    if (!selectedProject) return;
+    try {
+      const data = await fetchJson(`${API}/${encodeURIComponent(selectedProject)}/scan`, { method: 'POST' });
+      notifications.success(data.message || 'Scan requested');
+    } catch (err) {
+      notifications.error(`Scan failed: ${err.message}`);
+    }
+  }, [selectedProject]);
 
   const perspectiveUrl = config?.gatewayUrl
     ? `${config.gatewayUrl}/data/perspective/client/${selectedProject}`
@@ -1225,11 +1480,27 @@ export default function ProjectManager() {
               >
                 <Wand2 size={14} /> AI Generate View
               </button>
+              <div className="flex gap-1.5">
+                <button
+                  onClick={() => setShowCreateView(true)}
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium t-accent t-accent-soft hover:opacity-90 rounded-lg transition-colors cursor-pointer"
+                >
+                  <Plus size={14} /> New View
+                </button>
+                <button
+                  onClick={() => setShowImportView(true)}
+                  className="flex items-center justify-center gap-1 px-2.5 py-2 text-sm font-medium t-text-2 t-bg-alt hover:opacity-90 rounded-lg transition-colors cursor-pointer"
+                  title="Import view from JSON"
+                >
+                  <Upload size={14} />
+                </button>
+              </div>
               <button
-                onClick={() => setShowCreateView(true)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium t-accent t-accent-soft hover:opacity-90 rounded-lg transition-colors cursor-pointer"
+                onClick={requestScan}
+                disabled={!selectedProject}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium t-text-m t-bg-alt rounded-lg hover:opacity-90 transition-colors disabled:opacity-40 cursor-pointer"
               >
-                <Plus size={14} /> New View
+                <RefreshCw size={12} /> Request Gateway Scan
               </button>
             </div>
           )}
@@ -1258,6 +1529,7 @@ export default function ProjectManager() {
                   {[
                     { id: 'tree', label: 'Component Tree', icon: Layers },
                     { id: 'preview', label: 'Preview', icon: Monitor },
+                    { id: 'live', label: 'Live', icon: Globe },
                     { id: 'editor', label: 'JSON Editor', icon: Code },
                   ].map(tab => (
                     <button
@@ -1281,6 +1553,27 @@ export default function ProjectManager() {
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium t-accent-bg text-white rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
                 >
                   <Save size={12} /> Save
+                </button>
+                <button
+                  onClick={exportView}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium t-text-2 t-bg-alt rounded-lg hover:opacity-90 transition-colors cursor-pointer"
+                  title="Export view JSON"
+                >
+                  <Download size={12} />
+                </button>
+                <button
+                  onClick={() => { setNewViewName(selectedView + '_copy'); setShowDuplicateView(true); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium t-text-2 t-bg-alt rounded-lg hover:opacity-90 transition-colors cursor-pointer"
+                  title="Duplicate view"
+                >
+                  <Copy size={12} />
+                </button>
+                <button
+                  onClick={() => { setNewViewName(selectedView); setShowRenameView(true); }}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium t-text-2 t-bg-alt rounded-lg hover:opacity-90 transition-colors cursor-pointer"
+                  title="Rename / move view"
+                >
+                  <Edit3 size={12} />
                 </button>
                 <button
                   onClick={deleteView}
@@ -1354,6 +1647,67 @@ export default function ProjectManager() {
 
                 {activeTab === 'preview' && (
                   <ViewPreview viewContent={viewContent} />
+                )}
+
+                {activeTab === 'live' && (
+                  <div className="h-full flex flex-col">
+                    {perspectiveUrl ? (
+                      <>
+                        <div className="px-4 py-2 t-bg-alt border-b t-border-s flex items-center gap-2 text-xs shrink-0">
+                          <Globe size={12} className="t-accent" />
+                          <span className="t-text-m">Live Perspective View</span>
+                          <div className="flex-1" />
+                          <button
+                            onClick={requestScan}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium t-accent t-accent-soft rounded transition-colors cursor-pointer"
+                          >
+                            <RefreshCw size={10} /> Request Scan
+                          </button>
+                        </div>
+                        <div className="flex-1 flex items-center justify-center p-8">
+                          <div className="text-center max-w-lg space-y-4">
+                            <Globe size={48} className="mx-auto t-accent" />
+                            <h3 className="text-lg font-semibold t-text">Open in Ignition Gateway</h3>
+                            <p className="text-sm t-text-m">
+                              Perspective views are rendered by the Ignition Gateway. Click below to see this view live.
+                            </p>
+                            <div className="p-3 t-bg-alt rounded-lg border t-border-s">
+                              <code className="text-xs t-accent font-mono break-all">{perspectiveUrl}/{selectedView}</code>
+                            </div>
+                            <div className="flex gap-3 justify-center">
+                              <a
+                                href={`${perspectiveUrl}/${selectedView}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white t-accent-bg rounded-lg hover:opacity-90 cursor-pointer"
+                              >
+                                <ExternalLink size={14} /> Open in New Tab
+                              </a>
+                              <a
+                                href={perspectiveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium t-accent t-accent-soft rounded-lg hover:opacity-90 cursor-pointer"
+                              >
+                                <Globe size={14} /> Open Project Root
+                              </a>
+                            </div>
+                            <div className="text-xs t-text-m space-y-1">
+                              <p>After creating or editing a view, click <strong>Request Scan</strong> to notify the Gateway.</p>
+                              <p>Changes typically appear within 2-5 seconds.</p>
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="flex-1 flex items-center justify-center t-text-m">
+                        <div className="text-center">
+                          <Globe size={40} className="mx-auto mb-3 t-text-m" />
+                          <p className="text-sm">Configure Gateway URL in Settings to enable live preview</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {activeTab === 'editor' && (
@@ -1460,6 +1814,44 @@ export default function ProjectManager() {
           project={selectedProject}
           onCreated={() => { selectProject(selectedProject); setShowAIGenerator(false); }}
           onClose={() => setShowAIGenerator(false)}
+        />
+      )}
+
+      {/* Duplicate View Modal */}
+      {showDuplicateView && (
+        <SimpleInputModal
+          title="Duplicate View"
+          label="New View Path / Name"
+          placeholder="e.g. Pages/DashboardCopy"
+          value={newViewName}
+          onChange={setNewViewName}
+          onSubmit={duplicateView}
+          onClose={() => { setShowDuplicateView(false); setNewViewName(''); }}
+          submitLabel="Duplicate"
+          submitIcon={Copy}
+        />
+      )}
+
+      {/* Rename View Modal */}
+      {showRenameView && (
+        <SimpleInputModal
+          title="Rename / Move View"
+          label="New View Path / Name"
+          placeholder="e.g. Pages/NewName"
+          value={newViewName}
+          onChange={setNewViewName}
+          onSubmit={renameView}
+          onClose={() => { setShowRenameView(false); setNewViewName(''); }}
+          submitLabel="Rename"
+          submitIcon={Edit3}
+        />
+      )}
+
+      {/* Import View Modal */}
+      {showImportView && (
+        <ImportViewModal
+          onImport={importView}
+          onClose={() => setShowImportView(false)}
         />
       )}
     </div>

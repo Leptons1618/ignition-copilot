@@ -15,26 +15,54 @@ router.post('/stream', async (req, res) => {
       return res.status(400).json({ error: 'messages array required' });
     }
 
+    console.log('[stream] Starting chat stream, model:', options.model || 'default');
+
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // Flush headers immediately for proxy compatibility
+    if (typeof res.flush === 'function') res.flush();
 
     const send = (event, data) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
     };
 
-    let closed = false;
-    req.on('close', () => { closed = true; });
+    // Send immediate keepalive so clients/proxies know the stream is alive
+    send('status', { status: 'started', model: options.model || 'default' });
 
-    for await (const event of chatStream(messages, { sessionId, ...options })) {
-      if (closed) break;
-      send(event.type, event.data);
+    let closed = false;
+    req.on('close', () => { closed = true; console.log('[stream] Client disconnected'); });
+
+    // Periodic keepalive to prevent proxy/client body timeouts
+    const keepalive = setInterval(() => {
+      console.log('[stream] Keepalive tick, closed:', closed);
+      if (!closed) {
+        const ok = res.write(': keepalive\n\n');
+        console.log('[stream] Keepalive write returned:', ok);
+      }
+    }, 5000);
+
+    try {
+      console.log('[stream] Entering for-await loop');
+      for await (const event of chatStream(messages, { sessionId, ...options })) {
+        console.log('[stream] Got event:', event.type);
+        if (closed) break;
+        send(event.type, event.data);
+      }
+      console.log('[stream] for-await loop completed normally');
+    } catch (loopErr) {
+      console.error('[stream] for-await loop error:', loopErr.message, loopErr.stack);
+      throw loopErr;
+    } finally {
+      clearInterval(keepalive);
     }
 
     if (!closed) res.end();
+    console.log('[stream] Stream completed');
   } catch (err) {
     console.error('Stream error:', err.message);
     if (!res.headersSent) {

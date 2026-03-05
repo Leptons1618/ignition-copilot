@@ -16,6 +16,7 @@ const SEARCH_CACHE_TTL_MS = 60000;
 
 let documents = [];
 let initialized = false;
+let initPromise = null;
 
 const embeddingCache = new Map();
 const searchCache = new Map();
@@ -81,44 +82,49 @@ function truncateText(text, maxChars) {
 
 export async function initRAG() {
   if (initialized) return documents.length;
+  if (initPromise) return initPromise;
 
-  console.log('Initializing RAG: loading and embedding Ignition docs...');
+  initPromise = (async () => {
+    console.log('Initializing RAG: loading and embedding Ignition docs...');
 
-  if (!existsSync(DOCS_DIR)) {
-    console.warn(`Docs directory not found: ${DOCS_DIR}`);
-    initialized = true;
-    return 0;
-  }
-
-  const files = readdirSync(DOCS_DIR).filter(f => f.endsWith('.md'));
-  let totalChunks = 0;
-
-  for (const file of files) {
-    const content = readFileSync(join(DOCS_DIR, file), 'utf-8');
-    const title = content.split('\n')[0]?.replace(/^#+\s*/, '') || file;
-    const chunks = chunkText(content);
-
-    for (let i = 0; i < chunks.length; i++) {
-      try {
-        const emb = await embed(chunks[i]);
-        documents.push({
-          id: `${file}#${i}`,
-          text: chunks[i],
-          source: file,
-          title,
-          embedding: emb,
-        });
-        totalChunks++;
-      } catch (err) {
-        console.warn(`Failed embedding ${file} chunk ${i}: ${err.message}`);
-      }
+    if (!existsSync(DOCS_DIR)) {
+      console.warn(`Docs directory not found: ${DOCS_DIR}`);
+      initialized = true;
+      return 0;
     }
-    console.log(`Loaded ${file}: ${chunks.length} chunks`);
-  }
 
-  initialized = true;
-  console.log(`RAG ready with ${totalChunks} embedded chunks`);
-  return totalChunks;
+    const files = readdirSync(DOCS_DIR).filter(f => f.endsWith('.md'));
+    let totalChunks = 0;
+
+    for (const file of files) {
+      const content = readFileSync(join(DOCS_DIR, file), 'utf-8');
+      const title = content.split('\n')[0]?.replace(/^#+\s*/, '') || file;
+      const chunks = chunkText(content);
+
+      for (let i = 0; i < chunks.length; i++) {
+        try {
+          const emb = await embed(chunks[i]);
+          documents.push({
+            id: `${file}#${i}`,
+            text: chunks[i],
+            source: file,
+            title,
+            embedding: emb,
+          });
+          totalChunks++;
+        } catch (err) {
+          console.warn(`Failed embedding ${file} chunk ${i}: ${err.message}`);
+        }
+      }
+      console.log(`Loaded ${file}: ${chunks.length} chunks`);
+    }
+
+    initialized = true;
+    console.log(`RAG ready with ${totalChunks} embedded chunks`);
+    return totalChunks;
+  })();
+
+  return initPromise;
 }
 
 export async function searchDocs(query, topK = 5, options = {}) {

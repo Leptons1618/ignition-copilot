@@ -14,24 +14,16 @@ export async function sendChat(messages, sessionId = 'default', options = {}) {
  * Stream chat via SSE. Calls onEvent({ type, data }) for each event.
  * Returns an abort function.
  * Event types: 'token', 'tool_start', 'tool_result', 'done', 'error'
+ *
+ * Uses the non-streaming /api/chat endpoint and simulates streaming events
+ * for compatibility with the Chat UI.
  */
 export function streamChat(messages, sessionId = 'default', options = {}, onEvent) {
   const controller = new AbortController();
-  const ACTIVITY_TIMEOUT_MS = 60000;
 
   (async () => {
-    let activityTimer;
-    const resetTimer = () => {
-      clearTimeout(activityTimer);
-      activityTimer = setTimeout(() => {
-        controller.abort();
-        onEvent({ type: 'error', data: { message: 'Response timed out after 60s. The LLM may be unavailable or overloaded.' } });
-      }, ACTIVITY_TIMEOUT_MS);
-    };
-
     try {
-      resetTimer();
-      const res = await fetch(`${API}/chat/stream`, {
+      const res = await fetch(`${API}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages, sessionId, options }),
@@ -39,44 +31,31 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
       });
 
       if (!res.ok) {
-        clearTimeout(activityTimer);
         const errBody = await res.text().catch(() => '');
         onEvent({ type: 'error', data: { message: `Server error ${res.status}: ${errBody || 'Unknown error'}` } });
         return;
       }
 
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+      const result = await res.json();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        resetTimer();
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop() || '';
-
-        for (const part of parts) {
-          const lines = part.split('\n');
-          let eventType = '';
-          let eventData = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7);
-            else if (line.startsWith('data: ')) eventData = line.slice(6);
-          }
-          if (eventType && eventData) {
-            try {
-              onEvent({ type: eventType, data: JSON.parse(eventData) });
-            } catch {
-              onEvent({ type: eventType, data: eventData });
-            }
-          }
-        }
+      // Emit tool events for each tool call
+      for (const tc of (result.toolCalls || [])) {
+        onEvent({ type: 'tool_start', data: { tool: tc.tool, args: tc.args } });
+        onEvent({ type: 'tool_result', data: { tool: tc.tool, args: tc.args, result: tc.result } });
       }
-      clearTimeout(activityTimer);
+
+      // Emit done event
+      onEvent({
+        type: 'done',
+        data: {
+          content: result.content,
+          toolCalls: result.toolCalls,
+          chartData: result.chartData,
+          model: result.model,
+          perf: result.perf,
+        },
+      });
     } catch (err) {
-      clearTimeout(activityTimer);
       if (err.name !== 'AbortError') {
         onEvent({ type: 'error', data: { message: err.message } });
       }
@@ -195,6 +174,38 @@ export async function getAssetHealth(assetPath = '[default]/DemoPlant/MotorM12')
 
 export async function getAlarmSummary(startTime = '-24h', priority = '') {
   const res = await fetch(`${API}/insights/alarm-summary?startTime=${encodeURIComponent(startTime)}&priority=${encodeURIComponent(priority)}`);
+  return res.json();
+}
+
+export async function createTag(basePath, name, tagType = 'AtomicTag', dataType = 'Float8', value = 0) {
+  const res = await fetch(`${API}/ignition/create-tag`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ basePath, name, tagType, dataType, value }),
+  });
+  return res.json();
+}
+
+export async function updateTagConfig(path, config = {}) {
+  const res = await fetch(`${API}/ignition/update-tag`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, config }),
+  });
+  return res.json();
+}
+
+export async function deleteTags(paths) {
+  const res = await fetch(`${API}/ignition/delete-tag`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths }),
+  });
+  return res.json();
+}
+
+export async function getTagConfig(path) {
+  const res = await fetch(`${API}/ignition/tag-config?path=${encodeURIComponent(path)}`);
   return res.json();
 }
 

@@ -121,4 +121,28 @@ router.post('/create-tag', async (req, res) => {
   }
 });
 
+// Update tag config (e.g. enable history, set engUnit)
+router.put('/update-tag', async (req, res) => {
+  try {
+    const { path, config } = req.body;
+    if (!path) return res.status(400).json({ error: 'path required' });
+    const data = await ignition.updateTagConfig(path, config || {});
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete tags
+router.delete('/delete-tag', async (req, res) => {
+  try {
+    const { paths } = req.body;
+    if (!paths || !Array.isArray(paths)) return res.status(400).json({ error: 'paths array required' });
+    const data = await ignition.deleteTags(paths);
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;

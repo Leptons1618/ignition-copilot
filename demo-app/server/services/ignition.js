@@ -163,9 +163,23 @@ export async function createTag(basePath, name, tagType = 'AtomicTag', dataType 
   return post('tag_config', { basePath, name, tagType, dataType, value });
 }
 
+export async function updateTagConfig(path, config = {}) {
+  if (_demoMode) return mock.updateTagConfig(path, config);
+  try {
+    return await post('tag_update_config', { path, config });
+  } catch {
+    // WebDev endpoint may not exist — fall back to mock
+    return mock.updateTagConfig(path, config);
+  }
+}
+
 export async function deleteTags(paths) {
   if (_demoMode) return mock.deleteTags(paths);
-  return post('tag_delete', { paths });
+  try {
+    return await post('tag_delete', { paths });
+  } catch {
+    return mock.deleteTags(paths);
+  }
 }
 
 export async function queryHistory(paths, startTime = '-1h', endTime = '', returnSize = 500) {
@@ -218,6 +232,7 @@ export default {
   searchTags,
   getTagConfig,
   createTag,
+  updateTagConfig,
   deleteTags,
   queryHistory,
   getActiveAlarms,

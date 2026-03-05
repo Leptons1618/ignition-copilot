@@ -50,6 +50,8 @@ const TOOLS = [
   { type: 'function', function: { name: 'get_system_info', description: 'Get gateway system information.', parameters: { type: 'object', properties: {} } } },
   { type: 'function', function: { name: 'get_asset_health', description: 'Compute asset health score and recommendations.', parameters: { type: 'object', properties: { assetPath: { type: 'string' } } } } },
   { type: 'function', function: { name: 'create_tag', description: 'Create a new tag.', parameters: { type: 'object', properties: { basePath: { type: 'string' }, name: { type: 'string' }, dataType: { type: 'string', default: 'Float8' }, value: { default: 0 } }, required: ['basePath', 'name'] } } },
+  { type: 'function', function: { name: 'update_tag_config', description: 'Update tag configuration (e.g. enable history, set engineering unit).', parameters: { type: 'object', properties: { path: { type: 'string', description: 'Full tag path' }, config: { type: 'object', description: 'Config properties to update, e.g. { historyEnabled: true, engUnit: "RPM" }' } }, required: ['path', 'config'] } } },
+  { type: 'function', function: { name: 'delete_tags', description: 'Delete one or more tags.', parameters: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' }, description: 'Array of tag paths to delete' } }, required: ['paths'] } } },
   { type: 'function', function: { name: 'get_tag_config', description: 'Get tag configuration.', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'search_docs', description: 'Search Ignition documentation.', parameters: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } } },
 ];
@@ -244,10 +246,33 @@ async function buildRagContextMessage(query) {
 function parseToolArgs(tc) {
   const args = tc?.function?.arguments;
   if (!args) return {};
+  let parsed = args;
   if (typeof args === 'string') {
-    try { return JSON.parse(args); } catch { return {}; }
+    try { parsed = JSON.parse(args); } catch { return {}; }
   }
-  return args;
+  // Small models (e.g. llama3.2:3b) return schema-like objects instead of values:
+  //   { path: { type: "string", value: "DemoPlant" } }  or  { path: { type: "string" } }
+  // Normalize them to flat values.
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const fixed = {};
+    for (const [key, val] of Object.entries(parsed)) {
+      if (val && typeof val === 'object' && !Array.isArray(val) && 'type' in val) {
+        // Schema-like entry — extract .value if present, otherwise skip the key
+        if ('value' in val) {
+          let v = val.value;
+          if (val.type === 'boolean' && typeof v === 'string') v = v === 'true';
+          if (val.type === 'integer' && typeof v === 'string') v = parseInt(v, 10);
+          if (val.type === 'number' && typeof v === 'string') v = parseFloat(v);
+          fixed[key] = v;
+        }
+        // If no .value, omit — the tool will use its default
+      } else {
+        fixed[key] = val;
+      }
+    }
+    return fixed;
+  }
+  return parsed;
 }
 
 function normalizePathToken(token) {
@@ -299,6 +324,8 @@ async function executeTool(name, args = {}) {
       case 'get_system_info': return await ignition.getSystemInfo();
       case 'get_asset_health': return await getAssetHealth(args.assetPath || '[default]/DemoPlant/MotorM12');
       case 'create_tag': return await ignition.createTag(args.basePath, args.name, 'AtomicTag', args.dataType || 'Float8', args.value ?? 0);
+      case 'update_tag_config': return await ignition.updateTagConfig(args.path, args.config || {});
+      case 'delete_tags': return await ignition.deleteTags(args.paths || []);
       case 'get_tag_config': return await ignition.getTagConfig(args.path);
       case 'search_docs': return await searchDocs(args.query, 5);
       default: return { error: `Unknown tool: ${name}` };
@@ -338,6 +365,7 @@ export async function chat(messages, options = {}) {
       const response = await fetch(`${opts.ollamaUrl}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(300000),
         body: JSON.stringify({
           model: opts.model,
           messages: currentMessages,
@@ -496,6 +524,9 @@ export async function* chatStream(messages, options = {}) {
   const latestUser = getLastUserMessage(compact);
   const sessionMsg = getSessionContextMessage(sessionId);
 
+  // Yield initial keepalive so proxies/clients know the stream is alive
+  yield { type: 'status', data: { status: 'processing', model: opts.model } };
+
   const ragStarted = Date.now();
   const ragMsg = (opts.enableRagContext && shouldInjectDocs(latestUser))
     ? await buildRagContextMessage(latestUser) : null;
@@ -643,7 +674,8 @@ export async function* chatStream(messages, options = {}) {
         yield { type: 'tool_result', data: { tool: toolName, args: toolArgs, result } };
         currentMessages.push({ role: 'tool', content: JSON.stringify(result, null, 2) });
       }
-      // Reset for next iteration — model will summarize tool results
+      // Emit a thinking event so client activity timer resets before next LLM call
+      yield { type: 'thinking', data: { iteration: iteration + 1, toolsExecuted: toolCallLog.length } };
       fullContent = '';
       continue;
     }
