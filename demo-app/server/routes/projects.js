@@ -9,7 +9,14 @@ import { readdir, readFile, writeFile, mkdir, rm, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, relative, sep, dirname } from 'path';
 import { createHash } from 'crypto';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'url';
 import { chat as llmChat } from '../services/ollama.js';
+
+const execFileAsync = promisify(execFile);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const router = Router();
 
@@ -118,7 +125,11 @@ async function registerPageRoute(projectName, viewPath) {
     if (!config.pages) config.pages = {};
     const urlKey = '/' + viewPath;
     if (!config.pages[urlKey]) {
-      config.pages[urlKey] = { viewPath };
+      config.pages[urlKey] = {
+        mounts: {
+          center: { viewPath }
+        }
+      };
       await writeJsonSafe(configPath, config);
       await touchResourceJson(join(dirname(configPath), 'resource.json'));
       console.log(`[projects] Registered page route ${urlKey} → ${viewPath}`);
@@ -558,121 +569,132 @@ router.get('/:project/named-queries', async (req, res) => {
 
 // ─── AI View Generator ──────────────────────────────────
 
-const VIEW_GEN_SYSTEM = `You are an Ignition Perspective view generator. You MUST output ONLY valid JSON — no markdown, no code fences, no explanation text.
+const VIEW_GEN_SYSTEM = `You are an Ignition Perspective view generator. Output ONLY valid JSON — no markdown fences, no explanation, no commentary.
 
-Generate a complete Ignition Perspective view.json structure following this EXACT schema:
+Generate a complete Perspective view.json with this exact top-level structure:
 {
-  "custom": {
-    "pageConfig": {
-      "title": "Page Title",
-      "url": "/page-url",
-      "loginRequired": false
-    }
-  },
+  "custom": {},
   "params": {},
-  "props": {
-    "defaultSize": { "width": 1200, "height": 800 }
-  },
+  "props": { "defaultSize": { "width": 1200, "height": 800 } },
   "root": {
     "type": "ia.container.flex",
     "meta": { "name": "root" },
     "position": {},
-    "props": { "direction": "column", "style": { "padding": "16px", "gap": "12px" } },
+    "props": { "direction": "column" },
     "children": [ ... ]
   }
 }
 
-AVAILABLE COMPONENT TYPES (use ONLY these exact type identifiers):
+COMPONENT TYPES (use these exact identifiers):
 Containers:
-  ia.container.flex     — flexbox layout.  Props: direction, justify, alignItems, wrap, style (with gap).
-  ia.container.column   — column layout container.
+  ia.container.flex — flexbox. Props: direction ("row"|"column"), justify, alignItems, wrap, style.
 
 Display:
-  ia.display.label      — text label.  Props: text, style.
-  ia.display.icon       — material icon.  Props: path (e.g. "material/speed"), style.
-  ia.display.image      — image.  Props: src, style.
-  ia.display.markdown   — rich markdown.  Props: source.
-  ia.display.led-display — LED on/off indicator.  Props: color, size (integer px diameter — use 20-30 for inline indicators; do NOT size with style.width/height).
-  ia.display.progress   — progress bar.  Props: value (0-100), style.
-  ia.display.thermometer — thermometer display.  Props: value, minValue, maxValue, style.
-  ia.display.linear-scale — linear scale indicator.  Props: value, minValue, maxValue, style.
-  ia.display.sparkline  — inline mini-chart.  Props: data, style.
-  ia.display.table      — data table.  Props: data, columns, style.
-  ia.display.alarmstatustable — active alarms table.  Props: style.
-  ia.display.alarmjournaltable — alarm history table.  Props: style.
+  ia.display.label — text. Props: text, textStyle, style.
+  ia.display.icon — icon. Props: path ("material/speed"), style.
+  ia.display.markdown — markdown. Props: source.
+  ia.display.led-display — LED indicator. Props: color ("green"), size (integer, 20-30).
+  ia.display.progress — progress bar. Props: value (0-100), bar: {color}, style.
+  ia.chart.status-chart — alarm status chart. Props: alarms: { source: { path: "..." } }.
 
 Input:
-  ia.input.text-field   — text input.  Props: value, placeholder.
-  ia.input.numeric-entry-field — number input.  Props: value, min, max.
-  ia.input.dropdown     — dropdown.  Props: options, value.
-  ia.input.toggle-switch — toggle.  Props: value (boolean).
-  ia.input.button       — button.  Props: text, style.
-  ia.input.slider       — slider.  Props: value, min, max, step.
+  ia.input.text-field — text. Props: value, placeholder, style.
+  ia.input.dropdown — dropdown. Props: options [{label, value}], value, style.
+  ia.input.toggle-switch — toggle. Props: value (bool).
+  ia.input.button — button. Props: text, style.
 
 Charts:
-  ia.chart.timeseries   — time-series trend chart with pens for tag history.  Props: pens, style.
-  ia.chart.powerchart   — full-featured historical trend chart.  Props: pens, style.
-  ia.chart.xy           — XY chart for custom data/series.  Props: series, xAxes, yAxes, style.
-  ia.chart.pie          — pie chart.  Props: data, style.
-  ia.chart.gauge        — full gauge (arc or needle).  Props: value, minValue, maxValue, style.
-  ia.chart.simple-gauge — simple arc gauge.  Props: value, minValue, maxValue, style.
+  ia.chart.timeseries — time-series chart. Props: pens (see below), style.
+  ia.chart.pie — pie. Props: data [{label, value}], style.
 
 Symbols:
-  ia.symbol.motor       — animated motor symbol.  Props: state (running/stopped/faulted), style.
-  ia.symbol.pump        — animated pump symbol.  Props: state, style.
-  ia.symbol.valve       — animated valve symbol.  Props: state, style.
-  ia.symbol.sensor      — sensor symbol.  Props: state, style.
+  ia.symbol.motor — motor. Props: state (0=stopped, 1=running, 2=faulted).
+  ia.symbol.pump — pump. Props: state.
+  ia.symbol.valve — valve. Props: state.
 
-Navigation:
-  ia.navigation.link    — navigation link.  Props: text, href, style.
+TIME-SERIES CHART pens format (CRITICAL — must match exactly):
+{
+  "type": "ia.chart.timeseries",
+  "props": {
+    "pens": [
+      {
+        "name": "Temperature",
+        "source": { "type": "tag", "config": { "tagPath": "[default]Path/To/Tag" } },
+        "style": { "color": "#FF6B6B", "lineWidth": 2 }
+      }
+    ]
+  }
+}
+Each pen needs: name, source.type ("tag"), source.config.tagPath, style.color. Do NOT use a flat "tagPath" key — use nested source object.
 
-LAYOUT & POSITION RULES:
-- Every child inside a flex container should set "position": { "basis": "<size>" } to control its size. Use "basis": "200px" for fixed, "grow": 1 for flexible.
-- For equal KPI cards: "position": { "basis": "200px", "grow": 1 }
-- For chart areas: "position": { "basis": "300px" }
-- For header rows: "position": { "basis": "60px", "shrink": 0 }
+LAYOUT RULES:
+- Every child MUST have a "position" object. Use "basis" for sizing.
+- Header: { "basis": "50px", "shrink": 0 }
+- KPI card row: { "basis": "120px", "shrink": 0 }
+- Individual card: { "basis": "200px", "grow": 1 }
+- Chart area: { "basis": "400px", "grow": 1 }
+- Use "gap" in parent flex style instead of margins between children: "style": { "gap": "16px" }
 
 STYLE RULES:
-- Use style objects: { "padding": "16px", "gap": "12px", "backgroundColor": "#f8f9fa", "borderRadius": "8px" }
-- For KPI cards use: { "flex": "1 1 200px", "padding": "16px", "backgroundColor": "#ffffff", "borderRadius": "8px", "boxShadow": "0 1px 3px rgba(0,0,0,0.08)", "textAlign": "center" }
-- For headers: { "fontSize": "22px", "fontWeight": "bold", "marginBottom": "4px" }
-- For chart containers: { "height": "300px", "backgroundColor": "#ffffff", "borderRadius": "8px", "padding": "12px" }
-- For labels, use "textStyle" for font properties: { "fontSize": 16, "fontWeight": "bold" } separately from "style" (layout/spacing).
+- Set textStyle DIRECTLY in props as a static object. NEVER bind textStyle via propConfig expression.
+  Example: "props": { "text": "--", "textStyle": { "fontSize": 20, "fontWeight": "bold", "color": "#333" } }
+- Layout properties go in "style": { "padding": "16px", "backgroundColor": "#fff", "borderRadius": "8px" }
+- NEVER put fontSize, fontWeight, or color in "style" for labels.
+- KPI card style: { "padding": "16px", "backgroundColor": "#ffffff", "borderRadius": "8px", "boxShadow": "0 1px 3px rgba(0,0,0,0.08)", "textAlign": "center" }
 
-TAG BINDINGS:
-When tags are provided, add a "propConfig" sibling to "props" on the component. Each key in propConfig MUST be prefixed with "props." (scope prefix).
-Example for a label bound to a tag:
+TAG BINDINGS (propConfig):
+Add "propConfig" as sibling to "props". Keys MUST start with "props." prefix.
+CRITICAL: "transforms" array goes INSIDE the "binding" object, NOT as a sibling.
+
+Label bound to tag (with format transform):
 {
   "type": "ia.display.label",
-  "meta": { "name": "speed-value" },
-  "position": {},
-  "props": { "text": "" },
+  "meta": { "name": "TempValue" },
+  "position": { "basis": "40px" },
+  "props": { "text": "--", "textStyle": { "fontSize": 20, "fontWeight": "bold", "color": "#333" } },
   "propConfig": {
     "props.text": {
       "binding": {
         "type": "tag",
-        "config": { "path": "[default]DemoPlant/MotorM12/Speed" }
+        "config": { "tagPath": "[default]Path/To/Tag" },
+        "transforms": [
+          { "type": "expression", "expression": "value + ' °C'" }
+        ]
       }
     }
   }
 }
-IMPORTANT: Keys inside propConfig MUST start with "props." — e.g. "props.text", "props.value", "props.color". NEVER use bare keys like "text" or "value".
-— Use "props.text" for labels, "props.value" for gauges/inputs/progress, "props.color" for LEDs.
 
-TRANSFORMS (optional, add after binding):
-Format transform example (for dates):
-  "transforms": [{ "type": "format", "formatType": "datetime", "formatValue": { "date": "medium" } }]
-Script transform example (for value display):
-  "transforms": [{ "type": "script", "script": "return 'Temp: ' + str(round(value, 1)) + ' °C'" }]
+Label bound to tag (simple, no transform):
+  "propConfig": { "props.text": { "binding": { "type": "tag", "config": { "tagPath": "..." } } } }
 
-CRITICAL TAG RULE: Only bind to tag paths that are explicitly provided in the user message. NEVER invent, guess, or fabricate tag paths. If no suitable tag is provided for a value, use a static placeholder in props instead of a binding.
+Gauge/progress bound to tag:
+  "propConfig": { "props.value": { "binding": { "type": "tag", "config": { "tagPath": "..." } } } }
 
-COMPONENT RULES:
-- Every component MUST have: type, props, meta: { "name": "unique-kebab-name" }
-- Every container MUST have: children (array)
-- Give every component a descriptive meta.name
+LED color bound to expression:
+  "propConfig": { "props.color": { "binding": { "type": "expr", "config": { "expression": "if({[default]Path/To/Tag} > 80, 'red', 'green')" } } } }
 
-CRITICAL: Output ONLY the JSON object, nothing else. No markdown fences. No commentary.`;
+Motor/pump/valve state bound to tag:
+  "propConfig": { "props.state": { "binding": { "type": "expr", "config": { "expression": "if({[default]Path/To/BoolTag}, 1, 0)" } } } }
+
+CRITICAL RULES:
+1. propConfig keys MUST start with "props." — e.g. "props.text", "props.value"
+2. Only bind to tag paths explicitly provided. NEVER invent tag paths.
+3. If no tag matches a component, use a static value in props — no binding.
+4. Every component MUST have: type, props, meta: { "name": "UniquePascalName" }, position. Component names MUST use PascalCase (e.g. "TempValue", "KpiRow", "HeaderContainer", "AlarmTable", "MainChart").
+5. Every container MUST have children array.
+6. Default text for unbound labels: "--" or "N/A" (not empty string).
+7. Output ONLY the JSON object. No markdown fences. No commentary.
+8. Set textStyle DIRECTLY in "props" — NEVER use propConfig expression for textStyle.
+9. "transforms" MUST be INSIDE the "binding" object — never as sibling to "binding".
+10. For numeric display with units, use expression transform: { "type": "expression", "expression": "value + ' RPM'" }
+11. Do NOT use script transforms. Use expression transforms or format transforms only.
+12. Tag bindings MUST use "tagPath" in config, NOT "path". Example: { "type": "tag", "config": { "tagPath": "[default]Path/To/Tag" } }. The "path" key is ONLY for "property" type bindings.
+13. Valid binding types: "property", "expr", "tag", "expr-struct", "query", "tag-history". Do NOT invent other binding types.
+14. Valid transform types: "expression", "map", "script", "format". Prefer "expression" transforms.
+15. Valid expression functions: abs, ceil, floor, round, max, min, sqrt, now, dateFormat, dateParse, dateExtract, dateAdd, dateDiff, toStr, toInt, toFloat, toBool, len, substring, indexOf, replace, trim, upper, lower, concat, split, if, coalesce, isNull, isEmpty, forExpression, forEach, hasChanged, previousValue, objectAt, typeOf, toJson, fromJson, isNumeric.
+16. For time-series charts, use "ia.chart.timeseries" with pens array. Also valid: "ia.chart.powerchart" for more advanced charts.
+17. Binding scopes must start with: "props.", "position.", "custom.", "meta.", or "params.".`;
 
 function validateViewJson(content) {
   const result = {
@@ -748,10 +770,119 @@ function fixPropConfigScopes(node) {
   }
 }
 
+/**
+ * Fix transforms that are placed as siblings to "binding" instead of inside it.
+ * Also removes any expression bindings on textStyle (these should be static props).
+ */
+function fixBindingStructure(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.propConfig && typeof node.propConfig === 'object') {
+    for (const [key, entry] of Object.entries(node.propConfig)) {
+      if (!entry || typeof entry !== 'object') continue;
+      // Move transforms inside binding if they are siblings
+      if (entry.transforms && entry.binding && !entry.binding.transforms) {
+        entry.binding.transforms = entry.transforms;
+        delete entry.transforms;
+      }
+      // Remove expression bindings on textStyle (they produce strings, not objects)
+      if (key === 'props.textStyle' && entry.binding?.type === 'expr') {
+        delete node.propConfig[key];
+      }
+    }
+    // Clean up empty propConfig
+    if (Object.keys(node.propConfig).length === 0) delete node.propConfig;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) fixBindingStructure(child);
+  }
+}
+
+/**
+ * Fix tag bindings that use "path" instead of "tagPath" in config.
+ * Tag-type bindings require "tagPath"; "path" is only for property-type bindings.
+ * Discovered via ignition-lint MISSING_TAG_PATH validation.
+ */
+function fixTagBindingPaths(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.propConfig && typeof node.propConfig === 'object') {
+    for (const entry of Object.values(node.propConfig)) {
+      if (!entry?.binding) continue;
+      const b = entry.binding;
+      if (b.type === 'tag' && b.config) {
+        if (b.config.path && !b.config.tagPath) {
+          b.config.tagPath = b.config.path;
+          delete b.config.path;
+        }
+      }
+      // Also fix tag-history bindings
+      if (b.type === 'tag-history' && b.config) {
+        if (b.config.path && !b.config.tagPath) {
+          b.config.tagPath = b.config.path;
+          delete b.config.path;
+        }
+      }
+    }
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) fixTagBindingPaths(child);
+  }
+}
+
+/**
+ * Convert kebab-case component names to PascalCase.
+ * Ignition Perspective convention requires PascalCase for component names.
+ */
+function fixComponentNames(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.meta?.name && node.meta.name.includes('-')) {
+    node.meta.name = node.meta.name
+      .split('-')
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('');
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) fixComponentNames(child);
+  }
+}
+
+/**
+ * Fix invalid component types to valid Perspective types.
+ */
+function fixComponentTypes(node) {
+  if (!node || typeof node !== 'object') return;
+  // ia.chart.easyChart is not valid — use ia.chart.timeseries instead
+  if (node.type === 'ia.chart.easyChart') {
+    node.type = 'ia.chart.timeseries';
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) fixComponentTypes(child);
+  }
+}
+
+/**
+ * Run ignition-lint on a view directory and return parsed JSON results.
+ * Requires ignition-lint-toolkit pip package installed in the mcp-server venv.
+ */
+async function lintView(viewDir) {
+  const lintCli = join(__dirname, '..', '..', '..', 'mcp-server', '.venv', 'Scripts', 'ignition-lint.exe');
+  try {
+    const { stdout } = await execFileAsync(lintCli, [
+      '--target', viewDir, '--report-format', 'json'
+    ], { timeout: 30000 });
+    return JSON.parse(stdout);
+  } catch (err) {
+    // ignition-lint exits non-zero when there are findings — parse stdout anyway
+    if (err.stdout) {
+      try { return JSON.parse(err.stdout); } catch { /* fall through */ }
+    }
+    return { error: err.message, findings: [] };
+  }
+}
+
 /** Generate a view using the configured LLM */
 router.post('/:project/generate-view', async (req, res) => {
   try {
-    const { name, prompt, tags, model } = req.body;
+    const { name, prompt, tags, model, overwrite } = req.body;
     if (!name || !prompt) {
       return res.status(400).json({ success: false, error: 'name and prompt are required' });
     }
@@ -764,8 +895,8 @@ router.post('/:project/generate-view', async (req, res) => {
 
     // Check if view already exists
     const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', name);
-    if (await dirExists(viewDir)) {
-      return res.status(409).json({ success: false, error: `View "${name}" already exists. Choose a different name.` });
+    if (await dirExists(viewDir) && !overwrite) {
+      return res.status(409).json({ success: false, error: `View "${name}" already exists. Send overwrite:true to replace it.` });
     }
 
     console.log(`[projects] Generating view "${name}" for ${req.params.project} via LLM...`);
@@ -782,7 +913,7 @@ router.post('/:project/generate-view', async (req, res) => {
     userMsg += `\n\nOutput ONLY the complete view.json — no markdown, no commentary.`;
 
     // Call the LLM
-    const llmOpts = { maxIterations: 1, enableRagContext: false, noTools: true, numPredict: 4096 };
+    const llmOpts = { maxIterations: 1, enableRagContext: false, noTools: true, numPredict: 8192, temperature: 0.2, numCtx: 16384 };
     if (model) llmOpts.model = model;
     const result = await llmChat(
       [
@@ -797,7 +928,24 @@ router.post('/:project/generate-view', async (req, res) => {
     const responseText = (result.content || '').trim();
     // Handle potential markdown fences from LLM
     const jsonMatch = responseText.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const jsonStr = (jsonMatch ? jsonMatch[1] : responseText).trim();
+    let jsonStr = (jsonMatch ? jsonMatch[1] : responseText).trim();
+
+    // Handle models that include thinking/reasoning text before the JSON
+    // Find the first '{' that starts a JSON object
+    if (!jsonStr.startsWith('{')) {
+      const firstBrace = jsonStr.indexOf('{');
+      if (firstBrace !== -1) {
+        jsonStr = jsonStr.substring(firstBrace);
+        // Find matching closing brace by counting depth
+        let depth = 0;
+        let endIdx = -1;
+        for (let i = 0; i < jsonStr.length; i++) {
+          if (jsonStr[i] === '{') depth++;
+          else if (jsonStr[i] === '}') { depth--; if (depth === 0) { endIdx = i; break; } }
+        }
+        if (endIdx !== -1) jsonStr = jsonStr.substring(0, endIdx + 1);
+      }
+    }
 
     try {
       viewContent = JSON.parse(jsonStr);
@@ -822,6 +970,14 @@ router.post('/:project/generate-view', async (req, res) => {
 
     // Auto-fix propConfig keys missing "props." scope prefix
     if (viewContent.root) fixPropConfigScopes(viewContent.root);
+    // Fix transforms placement and remove bad textStyle bindings
+    if (viewContent.root) fixBindingStructure(viewContent.root);
+    // Fix tag bindings: config.path → config.tagPath (ignition-lint MISSING_TAG_PATH)
+    if (viewContent.root) fixTagBindingPaths(viewContent.root);
+    // Fix component names: kebab-case → PascalCase
+    if (viewContent.root) fixComponentNames(viewContent.root);
+    // Fix invalid component types (e.g. ia.chart.timeseries → ia.chart.easyChart)
+    if (viewContent.root) fixComponentTypes(viewContent.root);
 
     // Write the view to disk
     let savedToDisk = false;
@@ -855,12 +1011,25 @@ router.post('/:project/generate-view', async (req, res) => {
 
     console.log(`[projects] Generated view "${name}" — ${validation.componentCount} components, ${validation.tagBindings} tag bindings${savedToDisk ? '' : ' (not saved to disk)'}`);
 
+    // Run ignition-lint if saved to disk
+    let lintResults = null;
+    if (savedToDisk) {
+      try {
+        lintResults = await lintView(viewDir);
+        const issueCount = lintResults?.findings?.length || lintResults?.issues?.length || 0;
+        console.log(`[projects] Lint: ${issueCount} findings for "${name}"`);
+      } catch (lintErr) {
+        console.warn(`[projects] Lint failed: ${lintErr.message}`);
+      }
+    }
+
     res.json({
       success: true,
       name,
       validation,
       view: viewContent,
       savedToDisk,
+      lintResults,
       pageConfig: viewContent.custom?.pageConfig || null,
       componentCount: validation.componentCount,
       tagBindings: validation.tagBindings,
@@ -868,6 +1037,26 @@ router.post('/:project/generate-view', async (req, res) => {
     });
   } catch (err) {
     console.error('[projects] View generation error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Lint View ──────────────────────────────────────────
+
+router.post('/:project/lint-view', async (req, res) => {
+  try {
+    const { viewPath } = req.body;
+    if (!viewPath) return res.status(400).json({ success: false, error: 'viewPath is required' });
+
+    const viewDir = safePath(PROJECTS_DIR, req.params.project, PERSPECTIVE_MODULE, 'views', viewPath);
+    if (!await dirExists(viewDir)) {
+      return res.status(404).json({ success: false, error: `View "${viewPath}" not found` });
+    }
+
+    const results = await lintView(viewDir);
+    res.json({ success: true, viewPath, results });
+  } catch (err) {
+    console.error('[projects] Lint error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });

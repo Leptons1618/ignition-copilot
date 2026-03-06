@@ -452,8 +452,8 @@ export async function chat(messages, options = {}) {
   const baseMessages = noTools ? [] : [{ role: 'system', content: SYSTEM_PROMPT }];
   if (sessionMsg) baseMessages.push({ role: 'system', content: sessionMsg });
   if (ragMsg) baseMessages.push({ role: 'system', content: ragMsg });
-  // Inject tag context so AI knows what tags are available
-  const tagCtx = await buildTagContext();
+  // Inject tag context so AI knows what tags are available (skip for noTools like view gen)
+  const tagCtx = (!noTools) ? await buildTagContext() : null;
   if (tagCtx) baseMessages.push({ role: 'system', content: tagCtx });
 
   const toolCallLog = [];
@@ -474,7 +474,7 @@ export async function chat(messages, options = {}) {
           messages: currentMessages,
           ...(noTools ? {} : { tools: TOOLS }),
           stream: false,
-          options: { temperature: opts.temperature, num_predict: opts.numPredict },
+          options: { temperature: opts.temperature, num_predict: opts.numPredict, ...(opts.numCtx ? { num_ctx: opts.numCtx } : {}) },
         }),
       });
       llmLatencies.push(Date.now() - llmStarted);
@@ -500,7 +500,7 @@ export async function chat(messages, options = {}) {
     if (calls.length === 0) {
       updateSessionState(sessionId, latestUser);
       return {
-        content: result.content,
+        content: assistant.content,
         toolCalls: toolCallLog,
         model: opts.model,
         provider: opts.provider,
@@ -515,7 +515,7 @@ export async function chat(messages, options = {}) {
     }
 
     // Push assistant message with tool_calls
-    currentMessages.push({ role: 'assistant', content: result.content || '', tool_calls: calls });
+    currentMessages.push({ role: 'assistant', content: assistant.content || '', tool_calls: calls });
     for (const call of calls) {
       const toolName = call.function?.name || call.function;
       const toolArgs = parseToolArgs(call);
