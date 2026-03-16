@@ -1,77 +1,157 @@
 /**
  * Ignition WebDev client.
  * Talks to Ignition Gateway via WebDev REST endpoints.
- * Automatically falls back to mock data when the gateway is unreachable
- * or the trial has expired (HTTP 402).
+ * Mock/demo responses are only enabled when DEMO_MODE=true.
  */
 
 import mock from './mockIgnition.js';
+import { getServiceConfig } from '../routes/config.js';
 
-const GATEWAY = process.env.IGNITION_URL || 'http://localhost:8088';
-const PROJECT = process.env.IGNITION_PROJECT || 'ignition-copilot';
-const USERNAME = process.env.IGNITION_USER || 'anish';
-const PASSWORD = process.env.IGNITION_PASS || 'developer';
+const DEFAULT_GATEWAY = process.env.IGNITION_URL || 'http://localhost:8088';
+const DEFAULT_PROJECT = process.env.IGNITION_PROJECT || 'ignition-copilot';
+const DEFAULT_USERNAME = process.env.IGNITION_USER || 'anish';
+const DEFAULT_PASSWORD = process.env.IGNITION_PASS || 'developer';
 
-const BASE = `${GATEWAY}/system/webdev/${PROJECT}`;
-const AUTH = 'Basic ' + Buffer.from(`${USERNAME}:${PASSWORD}`).toString('base64');
+const REQUEST_TIMEOUT_MS = 15000;
+const PROBE_TIMEOUT_MS = 5000;
+const PROBE_INTERVAL_MS = 15000;
 
-let _demoMode = process.env.DEMO_MODE === 'true';   // can be forced via env
-const _forcedDemo = _demoMode;   // remember if it was forced — never probe away
-let _lastProbe = 0;      // timestamp of last gateway probe
-const PROBE_INTERVAL = 60_000; // re-check gateway once per minute
+const _forcedDemo = process.env.DEMO_MODE === 'true';
+let _demoMode = _forcedDemo;
+let _lastProbe = 0;
+let _lastProbeResult = {
+  ok: _forcedDemo,
+  status: _forcedDemo ? 200 : null,
+  error: _forcedDemo ? null : 'Not checked',
+  endpoint: null,
+  checkedAt: 0,
+};
+
+function summarizeBody(body = '', max = 220) {
+  const clean = String(body || '').replace(/\s+/g, ' ').trim();
+  return clean.length > max ? `${clean.slice(0, max)}...` : clean;
+}
+
+function toIgnitionError(message, details = {}) {
+  const err = new Error(message);
+  err.details = details;
+  return err;
+}
+
+function getRuntimeConnectionConfig() {
+  const runtime = getServiceConfig?.() || {};
+  const gateway = String(runtime.ignitionUrl || DEFAULT_GATEWAY).replace(/\/+$/, '');
+  const project = String(runtime.ignitionProject || DEFAULT_PROJECT).trim();
+  const username = String(runtime.ignitionUser || DEFAULT_USERNAME);
+  const password = String(runtime.ignitionPass || DEFAULT_PASSWORD);
+  return { gateway, project, username, password };
+}
+
+function getBaseUrl(config = getRuntimeConnectionConfig()) {
+  return `${config.gateway}/system/webdev/${config.project}`;
+}
+
+function getAuthHeader(config = getRuntimeConnectionConfig()) {
+  return 'Basic ' + Buffer.from(`${config.username}:${config.password}`).toString('base64');
+}
 
 function isDemoMode() {
   return _demoMode;
 }
 
-async function probeGateway() {
-  if (_forcedDemo) return; // never override forced demo mode
-  if (Date.now() - _lastProbe < PROBE_INTERVAL) return;
-  _lastProbe = Date.now();
+async function probeGateway(force = false) {
+  if (_forcedDemo) {
+    _lastProbeResult = {
+      ok: true,
+      status: 200,
+      error: null,
+      endpoint: `${getBaseUrl()}/system_info`,
+      checkedAt: Date.now(),
+    };
+    return _lastProbeResult;
+  }
+
+  const config = getRuntimeConnectionConfig();
+  const endpoint = `${getBaseUrl(config)}/system_info`;
+  const now = Date.now();
+  if (
+    !force
+    && now - _lastProbe < PROBE_INTERVAL_MS
+    && _lastProbeResult.checkedAt > 0
+    && _lastProbeResult.endpoint === endpoint
+  ) {
+    return _lastProbeResult;
+  }
+
+  _lastProbe = now;
   try {
-    // Probe an actual WebDev endpoint — the root gateway responds 200 even
-    // when the trial is expired; only WebDev returns 402.
-    const url = `${BASE}/system_info`;
-    const resp = await fetch(url, {
-      headers: { Authorization: AUTH },
-      signal: AbortSignal.timeout(4000),
+    const resp = await fetch(endpoint, {
+      headers: { Authorization: getAuthHeader(config) },
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    if (resp.status === 402) {
-      if (!_demoMode) console.log('[ignition] Trial expired (402) — switching to demo mode');
-      _demoMode = true;
-    } else if (resp.ok) {
-      if (_demoMode) console.log('[ignition] Gateway is back — switching to live mode');
-      _demoMode = false;
-    } else {
-      // Other error status — treat as unavailable
-      if (!_demoMode) console.log(`[ignition] Gateway error (${resp.status}) — switching to demo mode`);
-      _demoMode = true;
+    if (resp.ok) {
+      _lastProbeResult = { ok: true, status: resp.status, error: null, endpoint, checkedAt: now };
+      return _lastProbeResult;
     }
-  } catch {
-    if (!_demoMode) console.log('[ignition] Gateway unreachable — switching to demo mode');
-    _demoMode = true;
+    const body = await resp.text().catch(() => '');
+    const bodySnippet = summarizeBody(body);
+    const message = resp.status === 404
+      ? `Ignition WebDev endpoint not found at ${endpoint}. Ensure WebDev is installed and project "${config.project}" exposes system_info.`
+      : `Ignition gateway returned HTTP ${resp.status}${bodySnippet ? `: ${bodySnippet}` : ''}`;
+    _lastProbeResult = { ok: false, status: resp.status, error: message, endpoint, checkedAt: now };
+    return _lastProbeResult;
+  } catch (err) {
+    const message = `Ignition gateway probe failed: ${err.message}`;
+    _lastProbeResult = { ok: false, status: null, error: message, endpoint, checkedAt: now };
+    return _lastProbeResult;
+  }
+}
+
+async function ensureLiveGateway() {
+  const probe = await probeGateway();
+  if (!probe.ok) {
+    throw toIgnitionError(probe.error || 'Ignition gateway unavailable', { probe });
   }
 }
 
 async function get(resource, params = {}) {
-  const url = new URL(`${BASE}/${resource}`);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const resp = await fetch(url.toString(), {
-    headers: { Authorization: AUTH },
-    signal: AbortSignal.timeout(15000),
+  await ensureLiveGateway();
+  const config = getRuntimeConnectionConfig();
+  const url = new URL(`${getBaseUrl(config)}/${resource}`);
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+  const resp = await fetch(url.toString(), {
+    headers: { Authorization: getAuthHeader(config) },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw toIgnitionError(
+      `Ignition request failed (${resource}) HTTP ${resp.status}${body ? `: ${summarizeBody(body)}` : ''}`,
+      { status: resp.status, resource, url: url.toString(), body: summarizeBody(body) },
+    );
+  }
   return resp.json();
 }
 
 async function post(resource, body) {
-  const resp = await fetch(`${BASE}/${resource}`, {
+  await ensureLiveGateway();
+  const config = getRuntimeConnectionConfig();
+  const url = `${getBaseUrl(config)}/${resource}`;
+  const resp = await fetch(url, {
     method: 'POST',
-    headers: { Authorization: AUTH, 'Content-Type': 'application/json' },
+    headers: { Authorization: getAuthHeader(config), 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text().catch(() => '')}`);
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '');
+    throw toIgnitionError(
+      `Ignition request failed (${resource}) HTTP ${resp.status}${text ? `: ${summarizeBody(text)}` : ''}`,
+      { status: resp.status, resource, url, body: summarizeBody(text) },
+    );
+  }
   return resp.json();
 }
 
@@ -106,23 +186,27 @@ function normalizePaths(input) {
 }
 
 export async function testConnection() {
-  await probeGateway();
-  if (_demoMode) return true; // demo mode = "connected" with mock data
-  try {
-    const resp = await fetch(`${BASE}/system_info`, {
-      headers: { Authorization: AUTH },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (resp.status === 402) { _demoMode = true; return true; }
-    return resp.ok;
-  } catch {
-    _demoMode = true;
-    return true; // fallback to demo
-  }
+  const probe = await probeGateway(true);
+  return !!probe.ok;
+}
+
+export async function getGatewayStatus(force = false) {
+  const config = getRuntimeConnectionConfig();
+  const probe = await probeGateway(force);
+  return {
+    connected: !!probe.ok,
+    gateway: config.gateway,
+    project: config.project,
+    endpoint: probe.endpoint,
+    status: probe.status,
+    error: probe.error || null,
+    checkedAt: probe.checkedAt || Date.now(),
+    demoMode: _demoMode,
+    forcedDemo: _forcedDemo,
+  };
 }
 
 export async function browseTags(path = '[default]', recursive = false) {
-  await probeGateway();
   if (_demoMode) return mock.browseTags(path, recursive);
   return get('tag_browse', { path, recursive: String(recursive) });
 }
@@ -130,12 +214,7 @@ export async function browseTags(path = '[default]', recursive = false) {
 export async function readTags(paths) {
   const normalized = normalizePaths(paths);
   if (_demoMode) return mock.readTags(normalized);
-  try {
-    return await get('tag_read', { paths: normalized.join(',') });
-  } catch (err) {
-    if (err.message?.includes('402')) { _demoMode = true; return mock.readTags(normalized); }
-    throw err;
-  }
+  return get('tag_read', { paths: normalized.join(',') });
 }
 
 export async function writeTags(writes) {
@@ -145,12 +224,7 @@ export async function writeTags(writes) {
 
 export async function searchTags(pattern = '*', root = '[default]', tagType = '', max = 200) {
   if (_demoMode) return mock.searchTags(pattern, root, tagType, max);
-  try {
-    return await get('tag_search', { root, pattern, tagType, max: String(max) });
-  } catch (err) {
-    if (err.message?.includes('402')) { _demoMode = true; return mock.searchTags(pattern, root, tagType, max); }
-    throw err;
-  }
+  return get('tag_search', { root, pattern, tagType, max: String(max) });
 }
 
 export async function getTagConfig(path) {
@@ -170,21 +244,7 @@ export async function deleteTags(paths) {
 
 export async function queryHistory(paths, startTime = '-1h', endTime = '', returnSize = 500) {
   if (_demoMode) return mock.queryHistory(normalizePaths(paths), startTime, endTime, returnSize);
-  try {
-    const result = await post('history_query', { paths: normalizePaths(paths), startTime, endTime, returnSize });
-    // Detect historian that returns only null values (expired trial, no data)
-    const hasRealData = Object.values(result?.data || {}).some(info =>
-      (info.records || []).some(r => r.value !== null && r.value !== undefined)
-    );
-    if (!hasRealData && Object.keys(result?.data || {}).length > 0) {
-      console.log('[ignition] Historian returned only null values — falling back to mock history');
-      return mock.queryHistory(normalizePaths(paths), startTime, endTime, returnSize);
-    }
-    return result;
-  } catch (err) {
-    if (err.message?.includes('402')) { _demoMode = true; return mock.queryHistory(normalizePaths(paths), startTime, endTime, returnSize); }
-    throw err;
-  }
+  return post('history_query', { paths: normalizePaths(paths), startTime, endTime, returnSize });
 }
 
 export async function getActiveAlarms(source = '', priority = '') {
@@ -205,6 +265,28 @@ export async function getSystemInfo() {
   return get('system_info');
 }
 
+function normalizeProviderName(value) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  const m = s.match(/^\[([^\]]+)\]/);
+  return m ? m[1] : s.replace(/^\[|\]$/g, '');
+}
+
+export async function listTagProviders() {
+  if (_demoMode) {
+    const sys = await mock.getSystemInfo().catch(() => ({}));
+    const providers = Array.isArray(sys?.info?.tagProviders) ? sys.info.tagProviders : ['default'];
+    const names = [...new Set(providers.map(v => normalizeProviderName(v?.name || v)).filter(Boolean))];
+    return { success: true, providers: names.length > 0 ? names : ['default'], demoMode: true };
+  }
+
+  const info = await getSystemInfo();
+  const source = (info && typeof info === 'object' && info.info && typeof info.info === 'object') ? info.info : info;
+  const rawProviders = Array.isArray(source?.tagProviders) ? source.tagProviders : [];
+  const names = [...new Set(rawProviders.map(v => normalizeProviderName(v?.name || v)).filter(Boolean))];
+  return { success: true, providers: names.length > 0 ? names : ['default'], demoMode: false };
+}
+
 export async function executeExpression(expression) {
   if (_demoMode) return mock.executeExpression(expression);
   return post('script_exec', { expression });
@@ -223,6 +305,8 @@ export default {
   getActiveAlarms,
   queryAlarmJournal,
   getSystemInfo,
+  getGatewayStatus,
+  listTagProviders,
   executeExpression,
   isDemoMode,
 };

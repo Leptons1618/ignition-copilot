@@ -1,0 +1,77 @@
+services:
+  frontend:
+    build:
+      context: ./demo-app/client
+      dockerfile: Dockerfile
+    image: ignition-copilot-frontend:latest
+    container_name: ignition-copilot-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - "3000:80"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ignition-copilot-backend:latest
+    container_name: ignition-copilot-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: 3001
+      IGNITION_URL: ${IGNITION_URL:-http://host.docker.internal:8088}
+      IGNITION_PROJECT: ${IGNITION_PROJECT:-ignition-copilot}
+      IGNITION_USER: ${IGNITION_USER:-admin}
+      IGNITION_PASS: ${IGNITION_PASS:-password}
+      LLM_PROVIDER: ${LLM_PROVIDER:-none}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./demo-app/server/data:/app/demo-app/server/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3001/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    image: ignition-copilot-mcp:latest
+    container_name: ignition-copilot-mcp
+    restart: unless-stopped
+    environment:
+      IGNITION_URL: ${IGNITION_URL:-http://host.docker.internal:8088}
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      LLM_PROVIDER: ${LLM_PROVIDER:-none}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./mcp-server/config.json:/app/config.json
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ignition-copilot-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    profiles:
+      - local-llm
+
+volumes:
+  ollama-data:

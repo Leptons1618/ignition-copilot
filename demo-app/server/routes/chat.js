@@ -21,19 +21,26 @@ router.post('/stream', async (req, res) => {
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
 
     const send = (event, data) => {
       res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     };
 
     let closed = false;
-    req.on('close', () => { closed = true; });
+    const heartbeat = setInterval(() => {
+      if (!closed) send('ping', { t: Date.now() });
+    }, 15000);
+    const cleanup = () => clearInterval(heartbeat);
+    req.on('aborted', () => { closed = true; cleanup(); });
+    res.on('close', () => { closed = true; cleanup(); });
 
     for await (const event of chatStream(messages, { sessionId, ...options })) {
       if (closed) break;
       send(event.type, event.data);
     }
 
+    cleanup();
     if (!closed) res.end();
   } catch (err) {
     console.error('Stream error:', err.message);

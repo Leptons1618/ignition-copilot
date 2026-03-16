@@ -10,11 +10,21 @@ const router = Router();
 // Connection test
 router.get('/status', async (req, res) => {
   try {
-    const connected = await ignition.testConnection();
-    const info = connected ? await ignition.getSystemInfo().catch(() => null) : null;
-    res.json({ connected, info, demoMode: ignition.isDemoMode() });
+    const status = await ignition.getGatewayStatus(true);
+    const info = status.connected ? await ignition.getSystemInfo().catch(() => null) : null;
+    res.json({ ...status, info });
   } catch (err) {
     res.json({ connected: false, error: err.message, demoMode: ignition.isDemoMode() });
+  }
+});
+
+// Tag providers
+router.get('/providers', async (req, res) => {
+  try {
+    const data = await ignition.listTagProviders();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

@@ -79,3 +79,7 @@ tmp/
 # Node.js
 node_modules/
 dist/
+
+# Keep client utility library tracked
+!demo-app/client/src/lib/
+!demo-app/client/src/lib/**

@@ -4,10 +4,11 @@ import {
   Layers, Trash2, Download, StopCircle, Zap, Gauge, PanelRightOpen, PanelRightClose,
   X, Tag, RefreshCw, AlertTriangle, WifiOff, RotateCcw,
 } from 'lucide-react';
-import { streamChat, getChatModels, getChatConfig, setChatConfig } from '../api.js';
+import { streamChat, getChatModels, getChatConfig, setChatConfig, applyProjectChanges } from '../api.js';
 import MarkdownRenderer from './chat/MarkdownRenderer.jsx';
 import ToolCallCard from './chat/ToolCallCard.jsx';
 import ChartBlock from './chat/ChartBlock.jsx';
+import PlanApprovalModal from './ai/PlanApprovalModal.jsx';
 import Button from './ui/Button.jsx';
 import Badge from './ui/Badge.jsx';
 import { Select } from './ui/Input.jsx';
@@ -34,6 +35,9 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
   const [showSettings, setShowSettings] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
+  const [pendingPlan, setPendingPlan] = useState(null);
+  const [applyingPlan, setApplyingPlan] = useState(false);
+  const [planError, setPlanError] = useState(null);
   const endRef = useRef(null);
   const inputRef = useRef(null);
   const abortRef = useRef(null);
@@ -53,15 +57,15 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
       const modelList = m.models || [];
       setModels(modelList);
       if (modelList.length === 0) {
-        setConnectionError('No LLM models found. Ensure Ollama is running with at least one model pulled (e.g., "ollama pull llama3.2:3b").');
+        setConnectionError('No models were returned by the configured LLM provider. Verify provider URL, API key, and default model in Settings.');
         logger.warn('chat', 'no_models_found');
       }
       const modelNames = modelList.map(x => x.name || x);
-      const preferred = c.defaultModel || prev.model;
-      const validModel = modelNames.includes(preferred) ? preferred : (modelNames[0] ?? '');
       setConfigState(prev => ({
         ...prev,
-        model: validModel,
+        model: modelNames.includes(c.defaultModel || prev.model)
+          ? (c.defaultModel || prev.model)
+          : (modelNames[0] ?? c.defaultModel ?? prev.model ?? ''),
         temperature: c.temperature ?? prev.temperature,
         numPredict: c.numPredict ?? prev.numPredict,
         maxIterations: c.maxIterations ?? prev.maxIterations,
@@ -69,7 +73,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
       }));
       logger.info('chat', 'config_loaded', { models: modelList.length });
     } catch (err) {
-      setConnectionError(`Cannot connect to LLM service: ${err.message}. Ensure the server and Ollama are running.`);
+      setConnectionError(`Cannot connect to LLM service: ${err.message}. Ensure the server and selected provider are reachable.`);
       logger.error('chat', 'config_load_failed', { error: err.message });
     }
   }, []);
@@ -115,7 +119,7 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
     }
 
     if (!config.model) {
-      notifications.error('No model selected. Check Ollama connection in settings.');
+      notifications.error('No model selected. Check LLM provider settings.');
       return;
     }
 
@@ -202,8 +206,8 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
 
               // Detect connection issues
               if (errorMsg.includes('fetch') || errorMsg.includes('ECONNREFUSED') || errorMsg.includes('Failed')) {
-                setConnectionError('Lost connection to the LLM service. Check that Ollama is running.');
-                notifications.error('Chat connection lost. Check Ollama status.', 'Connection Error');
+                setConnectionError('Lost connection to the LLM service. Check provider URL/API key and service status.');
+                notifications.error('Chat connection lost. Check LLM provider status.', 'Connection Error');
               }
               break;
             }
@@ -212,6 +216,16 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
           msgs[assistantIdx] = msg;
           return msgs;
         });
+
+        if (
+          event.type === 'tool_result'
+          && event.data?.tool === 'plan_project_changes'
+          && event.data?.result?.requiresConfirmation
+          && event.data?.result?.planId
+        ) {
+          setPendingPlan(event.data.result);
+          setPlanError(null);
+        }
       }
     );
 
@@ -226,7 +240,53 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
 
   const clearChat = () => {
     setMessages([]);
+    setPendingPlan(null);
+    setPlanError(null);
     sessionIdRef.current = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  };
+
+  const closePendingPlan = () => {
+    if (applyingPlan) return;
+    setPendingPlan(null);
+    setPlanError(null);
+  };
+
+  const approvePendingPlan = async () => {
+    if (!pendingPlan?.planId || applyingPlan) return;
+    setApplyingPlan(true);
+    setPlanError(null);
+    try {
+      const result = await applyProjectChanges(pendingPlan.planId);
+      if (!result?.success) throw new Error(result?.error || 'Failed to apply approved plan');
+
+      setMessages(prev => ([
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Applied approved plan for project "${pendingPlan.project}" with revision \`${result.revisionId}\`. Ask me to revert this revision if needed.`,
+          toolCalls: [
+            {
+              tool: 'apply_project_changes',
+              args: { planId: pendingPlan.planId },
+              result,
+              status: 'success',
+            },
+          ],
+          streaming: false,
+          perf: null,
+          model: config.model,
+        },
+      ]));
+
+      notifications.success(`Plan applied (revision ${result.revisionId})`);
+      setPendingPlan(null);
+    } catch (err) {
+      const message = err?.message || 'Plan apply failed';
+      setPlanError(message);
+      notifications.error(`Plan apply failed: ${message}`);
+    } finally {
+      setApplyingPlan(false);
+    }
   };
 
   const exportChat = () => {
@@ -497,6 +557,18 @@ export default function Chat({ onShowChart, seedPrompt, workspaceTags = [], onAd
           )}
         </aside>
       )}
+
+      <PlanApprovalModal
+        open={!!pendingPlan}
+        plan={pendingPlan}
+        busy={applyingPlan}
+        error={planError}
+        title="Approve AI Project Plan"
+        approveLabel="Approve & Apply"
+        rejectLabel="Reject"
+        onApprove={approvePendingPlan}
+        onClose={closePendingPlan}
+      />
     </div>
   );
 }

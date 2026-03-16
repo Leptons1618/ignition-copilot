@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOCS_DIR = join(__dirname, '..', 'data', 'ignition-docs');
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 const EMBED_MODEL = 'nomic-embed-text';
+const RAG_CONCURRENCY = Number(process.env.RAG_CONCURRENCY || 4);
 
 const EMBEDDING_CACHE_LIMIT = 5000;
 const SEARCH_CACHE_TTL_MS = 60000;
@@ -20,16 +21,28 @@ let initialized = false;
 const embeddingCache = new Map();
 const searchCache = new Map();
 
-function cosineSim(a, b) {
+function log(level, message, meta = {}) {
+  const text = `[rag:${level}] ${message}`;
+  if (Object.keys(meta).length > 0) console[level](text, meta);
+  else console[level](text);
+}
+
+function l2Norm(vector = []) {
+  let sum = 0;
+  for (let i = 0; i < vector.length; i++) sum += vector[i] * vector[i];
+  return Math.sqrt(sum) || 1;
+}
+
+function normalizeEmbedding(vector = []) {
+  const norm = l2Norm(vector);
+  return vector.map(v => v / norm);
+}
+
+function cosineSimNormalized(a, b) {
   let dot = 0;
-  let magA = 0;
-  let magB = 0;
-  for (let i = 0; i < a.length; i++) {
-    dot += a[i] * b[i];
-    magA += a[i] * a[i];
-    magB += b[i] * b[i];
-  }
-  return dot / (Math.sqrt(magA) * Math.sqrt(magB) + 1e-10);
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) dot += a[i] * b[i];
+  return dot;
 }
 
 function trimCache(map, limit) {
@@ -52,9 +65,29 @@ async function embed(text) {
   if (!resp.ok) throw new Error(`Embed failed: ${resp.status}`);
   const data = await resp.json();
   const vector = data.embeddings?.[0] || data.embedding;
-  embeddingCache.set(text, vector);
+  const normalized = normalizeEmbedding(vector || []);
+  embeddingCache.set(text, normalized);
   trimCache(embeddingCache, EMBEDDING_CACHE_LIMIT);
-  return vector;
+  return normalized;
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const out = new Array(items.length);
+  let index = 0;
+
+  async function run() {
+    while (index < items.length) {
+      const current = index;
+      index++;
+      out[current] = await worker(items[current], current);
+    }
+  }
+
+  const runners = [];
+  const limit = Math.max(1, Math.min(concurrency, items.length));
+  for (let i = 0; i < limit; i++) runners.push(run());
+  await Promise.all(runners);
+  return out;
 }
 
 function chunkText(text, maxChars = 800, overlap = 100) {
@@ -82,10 +115,10 @@ function truncateText(text, maxChars) {
 export async function initRAG() {
   if (initialized) return documents.length;
 
-  console.log('Initializing RAG: loading and embedding Ignition docs...');
+  log('info', 'Initializing RAG documents and embeddings');
 
   if (!existsSync(DOCS_DIR)) {
-    console.warn(`Docs directory not found: ${DOCS_DIR}`);
+    log('warn', `Docs directory not found: ${DOCS_DIR}`);
     initialized = true;
     return 0;
   }
@@ -98,26 +131,30 @@ export async function initRAG() {
     const title = content.split('\n')[0]?.replace(/^#+\s*/, '') || file;
     const chunks = chunkText(content);
 
-    for (let i = 0; i < chunks.length; i++) {
+    const embeddedChunks = await mapWithConcurrency(chunks, RAG_CONCURRENCY, async (chunk, i) => {
       try {
-        const emb = await embed(chunks[i]);
-        documents.push({
+        const emb = await embed(chunk);
+        return {
           id: `${file}#${i}`,
-          text: chunks[i],
+          text: chunk,
           source: file,
           title,
           embedding: emb,
-        });
-        totalChunks++;
+        };
       } catch (err) {
-        console.warn(`Failed embedding ${file} chunk ${i}: ${err.message}`);
+        log('warn', `Failed embedding ${file} chunk ${i}: ${err.message}`);
+        return null;
       }
-    }
-    console.log(`Loaded ${file}: ${chunks.length} chunks`);
+    });
+
+    const valid = embeddedChunks.filter(Boolean);
+    documents.push(...valid);
+    totalChunks += valid.length;
+    log('info', `Loaded ${file}: ${valid.length}/${chunks.length} embedded chunks`);
   }
 
   initialized = true;
-  console.log(`RAG ready with ${totalChunks} embedded chunks`);
+  log('info', `RAG ready with ${totalChunks} embedded chunks`);
   return totalChunks;
 }
 
@@ -142,7 +179,7 @@ export async function searchDocs(query, topK = 5, options = {}) {
 
   const scored = documents.map(doc => ({
     ...doc,
-    score: cosineSim(queryEmb, doc.embedding),
+    score: cosineSimNormalized(queryEmb, doc.embedding),
   }));
 
   scored.sort((a, b) => b.score - a.score);
@@ -161,6 +198,10 @@ export async function searchDocs(query, topK = 5, options = {}) {
     totalDocs: documents.length,
     elapsedMs: Date.now() - started,
   };
+
+  if (value.elapsedMs > 500) {
+    log('warn', 'Slow RAG query', { query, elapsedMs: value.elapsedMs, docs: documents.length });
+  }
 
   searchCache.set(cacheKey, { ts: now, value });
   trimCache(searchCache, 500);

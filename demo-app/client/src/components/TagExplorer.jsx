@@ -4,7 +4,7 @@ import {
   Search, Plus, X, FilePlus2, Layers, RefreshCw, Check, Loader2, PencilLine,
   Tag as TagIcon,
 } from 'lucide-react';
-import { browseTags, readTags, searchTags, writeTags } from '../api.js';
+import { browseTags, readTags, searchTags, writeTags, getTagProviders } from '../api.js';
 import Button from './ui/Button.jsx';
 import Badge from './ui/Badge.jsx';
 import Modal from './ui/Modal.jsx';
@@ -27,6 +27,15 @@ function tagIcon(tag, size = 15) {
   if (dt.includes('string')) return <Type size={size} />;
   if (dt.includes('date')) return <Calendar size={size} />;
   return <FilePlus2 size={size} />;
+}
+
+function buildTagPath(parentPath, tag) {
+  if (tag?.fullPath) return String(tag.fullPath);
+  if (tag?.path) return String(tag.path);
+  const name = String(tag?.name || '').trim();
+  if (!parentPath) return name;
+  if (/^\[[^\]]+\]$/.test(parentPath)) return `${parentPath}${name}`;
+  return `${parentPath}/${name}`.replace(/\/{2,}/g, '/');
 }
 
 function ToggleSwitch({ checked, onChange, disabled }) {
@@ -85,7 +94,7 @@ function TagTreeNode({
   onStartEdit, onDoWrite, onCancelEdit, onToggleBoolean,
 }) {
   const isFolder = isTagFolder(tag);
-  const fullPath = parentPath === '[default]' ? `[default]/${tag.name}` : `${parentPath}/${tag.name}`;
+  const fullPath = buildTagPath(parentPath, tag);
   const isExpanded = expandedPaths.has(fullPath);
   const isLoading = loadingPaths.has(fullPath);
   const children = childrenMap[fullPath] || [];
@@ -226,6 +235,8 @@ function TagTreeNode({
 }
 
 export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) {
+  const [providers, setProviders] = useState(['default']);
+  const [provider, setProvider] = useState('default');
   const [rootTags, setRootTags] = useState([]);
   const [expandedPaths, setExpandedPaths] = useState(new Set());
   const [childrenMap, setChildrenMap] = useState({});
@@ -239,14 +250,52 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
   const [batchInput, setBatchInput] = useState('');
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const rootPath = `[${provider || 'default'}]`;
 
   useEffect(() => {
+    let active = true;
     setLoading(true);
-    browseTags('[default]').then(result => {
-      if (result.success !== false) setRootTags(result.tags || []);
-      else setError(result.error || 'Failed to load tags');
-    }).catch(err => setError(err.message)).finally(() => setLoading(false));
+    getTagProviders()
+      .then((result) => {
+        if (!active) return;
+        const nextProviders = Array.isArray(result?.providers) && result.providers.length > 0
+          ? result.providers
+          : ['default'];
+        setProviders(nextProviders);
+        setProvider(prev => (nextProviders.includes(prev) ? prev : nextProviders[0]));
+      })
+      .catch(() => {
+        if (!active) return;
+        setProviders(['default']);
+        setProvider('default');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(null);
+    setSearchResults(null);
+    setExpandedPaths(new Set());
+    setChildrenMap({});
+    browseTags(rootPath)
+      .then((result) => {
+        if (!active) return;
+        if (result.success !== false) setRootTags(result.tags || []);
+        else setError(result.error || 'Failed to load tags');
+      })
+      .catch((err) => {
+        if (active) setError(err.message);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [rootPath]);
 
   const toggleExpand = useCallback((fullPath) => {
     setExpandedPaths(prev => {
@@ -258,12 +307,18 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
       next.add(fullPath);
       if (!childrenMap[fullPath]) {
         setLoadingPaths(lp => new Set([...lp, fullPath]));
-        browseTags(fullPath).then(result => {
-          if (result.success !== false) {
-            setChildrenMap(cm => ({ ...cm, [fullPath]: result.tags || [] }));
-          }
-          setLoadingPaths(lp => { const n = new Set(lp); n.delete(fullPath); return n; });
-        });
+        browseTags(fullPath)
+          .then(result => {
+            if (result.success !== false) {
+              setChildrenMap(cm => ({ ...cm, [fullPath]: result.tags || [] }));
+            } else {
+              setError(result.error || 'Failed to browse tags');
+            }
+          })
+          .catch(err => setError(err.message))
+          .finally(() => {
+            setLoadingPaths(lp => { const n = new Set(lp); n.delete(fullPath); return n; });
+          });
       }
       return next;
     });
@@ -273,7 +328,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
     const paths = [];
     const collect = (tags, parentPath) => {
       for (const tag of tags) {
-        const fp = parentPath === '[default]' ? `[default]/${tag.name}` : `${parentPath}/${tag.name}`;
+        const fp = buildTagPath(parentPath, tag);
         if (!isTagFolder(tag)) {
           paths.push(fp);
         } else if (expandedPaths.has(fp) && childrenMap[fp]) {
@@ -281,9 +336,9 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
         }
       }
     };
-    collect(rootTags, '[default]');
+    collect(rootTags, rootPath);
     return paths;
-  }, [rootTags, expandedPaths, childrenMap]);
+  }, [rootTags, expandedPaths, childrenMap, rootPath]);
 
   useEffect(() => {
     if (visibleLeafPaths.length === 0) return;
@@ -345,7 +400,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
     setLoading(true);
     setError(null);
     try {
-      const result = await searchTags(searchQuery.trim());
+      const result = await searchTags(searchQuery.trim(), rootPath);
       setSearchResults(result.success !== false ? (result.matches || []) : []);
       if (result.success === false) setError(result.error || 'Search failed');
     } catch (err) {
@@ -371,13 +426,23 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
   return (
     <div className="h-full flex flex-col p-4 overflow-hidden t-bg gap-3">
       <div className="flex gap-2 items-center">
+        <select
+          value={provider}
+          onChange={e => setProvider(e.target.value)}
+          className="border t-border-s rounded-lg px-2.5 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:t-accent-border"
+          title="Tag provider"
+        >
+          {providers.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </select>
         <div className="relative flex-1">
           <Search size={15} className="absolute left-3 top-2.5 t-text-m" />
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && doSearch()}
-            placeholder="Search tags by name or pattern"
+            placeholder={`Search tags in ${rootPath}`}
             className="w-full t-field-bg border t-field-border rounded-lg pl-9 pr-3 py-2 t-field-fg text-sm focus:outline-none focus:t-accent-border focus:ring-1 focus:ring-[var(--color-accent)]"
           />
         </div>
@@ -412,7 +477,7 @@ export default function TagExplorer({ workspaceTags = [], onAddWorkspaceTags }) 
                 <TagTreeNode
                   key={`${tag.name}-${i}`}
                   tag={tag}
-                  parentPath="[default]"
+                  parentPath={rootPath}
                   depth={0}
                   expandedPaths={expandedPaths}
                   childrenMap={childrenMap}

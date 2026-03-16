@@ -1,0 +1,81 @@
+{
+  "revisionId": "rev-1771873349388-7b00f2e3",
+  "planId": "plan-1771873342727-a9f68bd3",
+  "project": "IGNITION_COPILOT",
+  "createdAt": "2026-02-23T19:02:29.398Z",
+  "operations": [
+    {
+      "type": "create_view",
+      "project": "IGNITION_COPILOT",
+      "path": "Dashboard",
+      "template": "blank"
+    },
+    {
+      "type": "modify_view",
+      "project": "IGNITION_COPILOT",
+      "path": "Dashboard",
+      "modifications": {
+        "tagReplacements": {},
+        "propertyUpdates": {},
+        "addComponents": [
+          {
+            "type": "Label",
+            "text": "Dashboard",
+            "position": {
+              "x": 20,
+              "y": 20
+            }
+          },
+          {
+            "type": "Chart",
+            "title": "Chart 1",
+            "position": {
+              "x": 20,
+              "y": 80
+            },
+            "size": {
+              "width": 400,
+              "height": 300
+            },
+            "config": {}
+          },
+          {
+            "type": "Chart",
+            "title": "Chart 2",
+            "position": {
+              "x": 440,
+              "y": 80
+            },
+            "size": {
+              "width": 400,
+              "height": 300
+            },
+            "config": {}
+          }
+        ]
+      }
+    }
+  ],
+  "snapshots": {
+    "IGNITION_COPILOT": {
+      "existed": true
+    }
+  },
+  "tagRollback": [],
+  "results": [
+    {
+      "type": "create_view",
+      "project": "IGNITION_COPILOT",
+      "result": {
+        "path": "Dashboard"
+      }
+    },
+    {
+      "type": "modify_view",
+      "project": "IGNITION_COPILOT",
+      "result": {
+        "path": "Dashboard"
+      }
+    }
+  ]
+}

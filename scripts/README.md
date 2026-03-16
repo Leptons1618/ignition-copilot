@@ -24,6 +24,13 @@ All operational commands are centralized here.
 - `scripts/test-all.ps1`
   - Runs build + smoke tests for all local services.
 
+## Bash script (Linux/macOS)
+
+- `scripts/run.sh`
+  - Unified shell runner for setup/build/run/smoke/test/status/stop workflows.
+  - Supports: `run-demo --vite --rebuild`, `run-all --skip-smoke` (auto rebuild by default; use `--no-rebuild` to skip).
+  - MCP stdio mode is supported via an internal keepalive pipe so `run-mcp` and `run-all` can keep MCP running in background.
+
 ## Usage
 
 ```powershell
@@ -35,7 +42,17 @@ pwsh ./scripts/test-all.ps1
 pwsh ./scripts/stop-all.ps1
 ```
 
+```bash
+./scripts/run.sh setup
+./scripts/run.sh build
+./scripts/run.sh run-all
+./scripts/run.sh status
+./scripts/run.sh test
+./scripts/run.sh stop
+```
+
 ## Logs and PIDs
 
 - Logs: `scripts/.logs/*.log`
 - PID file: `scripts/.pids.json`
+- Linux PID file: `scripts/.pids-linux.env`

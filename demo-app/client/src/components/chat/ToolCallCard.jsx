@@ -3,7 +3,7 @@ import Collapsible from '../ui/Collapsible.jsx';
 import Badge from '../ui/Badge.jsx';
 import {
   FolderTree, Eye, PencilLine, Search, LineChart, Bell, BookOpen,
-  Server, HeartPulse, FilePlus2, Settings, FileSearch, Wrench,
+  Server, HeartPulse, FilePlus2, Settings, FileSearch, Wrench, ClipboardList, CheckCircle2, RotateCcw,
 } from 'lucide-react';
 
 const TOOL_ICON_MAP = {
@@ -19,6 +19,9 @@ const TOOL_ICON_MAP = {
   create_tag: FilePlus2,
   get_tag_config: Settings,
   search_docs: FileSearch,
+  plan_project_changes: ClipboardList,
+  apply_project_changes: CheckCircle2,
+  revert_project_changes: RotateCcw,
 };
 
 export default function ToolCallCard({ toolCall }) {

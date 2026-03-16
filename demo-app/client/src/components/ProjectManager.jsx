@@ -2,9 +2,12 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   FolderOpen, FileJson, ChevronRight, ChevronDown, Plus, Save, Trash2, RefreshCw,
   Settings2, ExternalLink, Eye, Code, Layers, AlertTriangle, FolderTree, Search,
-  X, Check, Layout, BarChart3, Bell, Navigation, FileCode, Database, Copy,
+  X, Check, Layout, BarChart3, Bell, Navigation, FileCode, Database, Copy, Wand2, Undo2,
 } from 'lucide-react';
 import { useNotifications } from '../lib/notifications.jsx';
+import Modal from './ui/Modal.jsx';
+import Button from './ui/Button.jsx';
+import PlanApprovalModal from './ai/PlanApprovalModal.jsx';
 
 const API = '/api/projects';
 
@@ -123,6 +126,15 @@ export default function ProjectManager() {
   const [loading, setLoading] = useState(true);
   const [resourceTab, setResourceTab] = useState('views'); // 'views' | 'scripts' | 'queries'
   const [configForm, setConfigForm] = useState({ ignitionDir: '', gatewayUrl: '' });
+  const [showAiPrompt, setShowAiPrompt] = useState(false);
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiModels, setAiModels] = useState([]);
+  const [aiModel, setAiModel] = useState('');
+  const [aiPlanning, setAiPlanning] = useState(false);
+  const [aiPlan, setAiPlan] = useState(null);
+  const [aiApplying, setAiApplying] = useState(false);
+  const [aiPlanError, setAiPlanError] = useState(null);
+  const [lastRevisionId, setLastRevisionId] = useState('');
   const notifications = useNotifications();
   const editorRef = useRef(null);
 
@@ -130,6 +142,12 @@ export default function ProjectManager() {
   useEffect(() => {
     loadConfig();
   }, []);
+
+  useEffect(() => {
+    setAiPlan(null);
+    setAiPlanError(null);
+    setShowAiPrompt(false);
+  }, [selectedProject]);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -153,8 +171,10 @@ export default function ProjectManager() {
       } else if (data.projects.length > 0 && !selectedProject) {
         selectProject(data.projects[0].name);
       }
+      return data;
     } catch (err) {
       notifications.error(`Failed to load projects: ${err.message}`);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -179,6 +199,28 @@ export default function ProjectManager() {
       notifications.error(`Failed to load project: ${err.message}`);
     }
   }, []);
+
+  const refreshAfterAiChange = useCallback(async (preferredProject = selectedProject) => {
+    const data = await loadProjects();
+    const available = (data?.projects || []).map(p => p.name);
+    const nextProject = preferredProject && available.includes(preferredProject)
+      ? preferredProject
+      : available[0];
+
+    if (nextProject) {
+      await selectProject(nextProject);
+      return;
+    }
+
+    setSelectedProject(null);
+    setViews([]);
+    setScripts([]);
+    setQueries([]);
+    setSelectedView(null);
+    setViewContent(null);
+    setEditorText('');
+    setEditorDirty(false);
+  }, [loadProjects, selectedProject, selectProject]);
 
   const loadView = useCallback(async (viewItem) => {
     setSelectedView(viewItem.path);
@@ -259,6 +301,101 @@ export default function ProjectManager() {
     }
   }, [configForm, loadProjects]);
 
+  const openAiPlanner = async () => {
+    if (!selectedProject) {
+      notifications.warning('Select a project first to plan AI changes.');
+      return;
+    }
+    setAiPlanError(null);
+    try {
+      const [modelsResp, cfgResp] = await Promise.all([
+        fetchJson('/api/chat/models').catch(() => ({ models: [] })),
+        fetchJson('/api/chat/config').catch(() => ({})),
+      ]);
+      const names = (modelsResp.models || []).map(m => m.name || m).filter(Boolean);
+      setAiModels(names);
+      setAiModel(prev => {
+        if (prev && names.includes(prev)) return prev;
+        if (cfgResp.defaultModel && names.includes(cfgResp.defaultModel)) return cfgResp.defaultModel;
+        return names[0] || '';
+      });
+    } catch (err) {
+      notifications.warning(`Could not load AI models: ${err.message}`);
+    }
+    setShowAiPrompt(true);
+  };
+
+  const createAiPlan = useCallback(async () => {
+    const instruction = aiInstruction.trim();
+    if (!selectedProject) {
+      notifications.warning('Select a project before planning.');
+      return;
+    }
+    if (!instruction) {
+      notifications.warning('Describe the changes you want the AI to plan.');
+      return;
+    }
+
+    setAiPlanning(true);
+    setAiPlanError(null);
+    try {
+      const result = await fetchJson(`${API}/ai/plan`, {
+        method: 'POST',
+        body: JSON.stringify({ project: selectedProject, instruction, model: aiModel || undefined }),
+      });
+      setAiPlan(result);
+      setShowAiPrompt(false);
+      notifications.success('Plan generated. Review and approve before apply.');
+    } catch (err) {
+      setAiPlanError(err.message);
+      notifications.error(`AI plan failed: ${err.message}`);
+    } finally {
+      setAiPlanning(false);
+    }
+  }, [aiInstruction, selectedProject, aiModel, notifications]);
+
+  const approveAiPlan = useCallback(async () => {
+    if (!aiPlan?.planId || aiApplying) return;
+    setAiApplying(true);
+    setAiPlanError(null);
+    try {
+      const result = await fetchJson(`${API}/ai/apply`, {
+        method: 'POST',
+        body: JSON.stringify({ planId: aiPlan.planId }),
+      });
+      setAiPlan(null);
+      setLastRevisionId(result.revisionId || '');
+      await refreshAfterAiChange(selectedProject);
+      notifications.success(`Applied ${result.appliedCount || 0} changes.`);
+    } catch (err) {
+      setAiPlanError(err.message);
+      notifications.error(`Apply failed: ${err.message}`);
+    } finally {
+      setAiApplying(false);
+    }
+  }, [aiPlan, aiApplying, refreshAfterAiChange, selectedProject, notifications]);
+
+  const revertLastRevision = useCallback(async () => {
+    if (!lastRevisionId || aiApplying) return;
+    setAiApplying(true);
+    setAiPlanError(null);
+    try {
+      await fetchJson(`${API}/ai/revert`, {
+        method: 'POST',
+        body: JSON.stringify({ revisionId: lastRevisionId }),
+      });
+      const revertedRevision = lastRevisionId;
+      setLastRevisionId('');
+      await refreshAfterAiChange(selectedProject);
+      notifications.success(`Reverted revision ${revertedRevision}.`);
+    } catch (err) {
+      setAiPlanError(err.message);
+      notifications.error(`Revert failed: ${err.message}`);
+    } finally {
+      setAiApplying(false);
+    }
+  }, [lastRevisionId, aiApplying, refreshAfterAiChange, selectedProject, notifications]);
+
   const handleEditorChange = (e) => {
     const text = e.target.value;
     setEditorText(text);
@@ -291,12 +428,12 @@ export default function ProjectManager() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium t-text-2 mb-1">Ignition Installation Directory</label>
-              <input
-                value={configForm.ignitionDir}
-                onChange={e => setConfigForm(f => ({ ...f, ignitionDir: e.target.value }))}
-                placeholder="C:\Program Files\Inductive Automation\Ignition"
-                className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:t-accent-border"
-              />
+                <input
+                  value={configForm.ignitionDir}
+                  onChange={e => setConfigForm(f => ({ ...f, ignitionDir: e.target.value }))}
+                  placeholder="/opt/ignition or C:\Program Files\Inductive Automation\Ignition"
+                  className="w-full border t-field-border rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:t-accent-border"
+                />
               <p className="text-xs t-text-m mt-1">
                 Projects are read from <code className="t-bg-alt px-1 rounded">{'{'}dir{'}'}/data/projects/</code>
               </p>
@@ -406,6 +543,28 @@ export default function ProjectManager() {
           >
             <ExternalLink size={12} /> Open in Gateway
           </a>
+        )}
+
+        <button
+          onClick={openAiPlanner}
+          disabled={!selectedProject}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium t-accent t-accent-soft rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+          title="Plan AI-assisted project changes"
+        >
+          <Wand2 size={13} />
+          AI Plan
+        </button>
+
+        {lastRevisionId && (
+          <button
+            onClick={revertLastRevision}
+            disabled={aiApplying}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium t-err t-err-soft rounded-lg hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+            title={`Revert ${lastRevisionId}`}
+          >
+            <Undo2 size={13} />
+            Revert
+          </button>
         )}
 
         <button onClick={() => selectProject(selectedProject)} className="p-1.5 t-text-m hover:t-text-2 hover:t-surface-h rounded-lg transition-colors cursor-pointer" title="Refresh">
@@ -688,6 +847,77 @@ export default function ProjectManager() {
           </div>
         </div>
       )}
+
+      <Modal
+        open={showAiPrompt}
+        onClose={() => !aiPlanning && setShowAiPrompt(false)}
+        title="AI Project Plan"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-3">
+          <p className="text-sm t-text-2">
+            Describe the changes you want for <span className="font-mono">{selectedProject}</span>. The AI will draft a plan for explicit approval.
+          </p>
+          <div>
+            <label className="block text-xs font-medium t-text-2 mb-1">Planning model</label>
+            <select
+              value={aiModel}
+              onChange={e => setAiModel(e.target.value)}
+              className="w-full border t-border-s rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            >
+              {aiModels.length === 0 ? (
+                <option value="">Auto-select available model</option>
+              ) : (
+                aiModels.map(modelName => (
+                  <option key={modelName} value={modelName}>{modelName}</option>
+                ))
+              )}
+            </select>
+          </div>
+          <textarea
+            value={aiInstruction}
+            onChange={e => setAiInstruction(e.target.value)}
+            className="w-full min-h-[140px] border t-border-s rounded-lg px-3 py-2 text-sm t-field-bg t-field-fg t-field-border focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+            placeholder="Example: Add a Dashboard/LineOverview view, create scripts/line_metrics.py, and add a named query for hourly throughput."
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                createAiPlan();
+              }
+            }}
+          />
+          {aiPlanError && (
+            <div className="p-2 rounded-lg border t-err-border t-err-soft text-xs t-err">
+              {aiPlanError}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowAiPrompt(false)} disabled={aiPlanning}>
+              Cancel
+            </Button>
+            <Button variant="primary" onClick={createAiPlan} disabled={aiPlanning || !aiInstruction.trim()}>
+              {aiPlanning ? <RefreshCw size={13} className="animate-spin" /> : <Wand2 size={13} />}
+              Generate Plan
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <PlanApprovalModal
+        open={!!aiPlan}
+        plan={aiPlan}
+        busy={aiApplying}
+        error={aiPlanError}
+        title="Approve Project Changes"
+        approveLabel="Approve & Apply"
+        rejectLabel="Reject"
+        onClose={() => {
+          if (aiApplying) return;
+          setAiPlan(null);
+          setAiPlanError(null);
+        }}
+        onApprove={approveAiPlan}
+      />
     </div>
   );
 }

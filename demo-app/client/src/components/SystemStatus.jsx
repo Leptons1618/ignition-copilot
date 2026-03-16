@@ -3,7 +3,7 @@ import {
   Server, Cpu, BookOpen, Wrench, RefreshCw, Activity, Globe, Database,
   CheckCircle2, XCircle, AlertCircle, Layers,
 } from 'lucide-react';
-import { getIgnitionStatus, getChatTools, getRAGStats, getChatModels } from '../api.js';
+import { getIgnitionStatus, getChatTools, getRAGStats, getChatModels, getChatConfig } from '../api.js';
 import Button from './ui/Button.jsx';
 import Badge from './ui/Badge.jsx';
 import Card from './ui/Card.jsx';
@@ -15,21 +15,24 @@ export default function SystemStatus() {
   const [tools, setTools] = useState([]);
   const [ragStats, setRagStats] = useState(null);
   const [models, setModels] = useState([]);
+  const [chatConfig, setChatConfig] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const [s, t, r, m] = await Promise.allSettled([
+      const [s, t, r, m, c] = await Promise.allSettled([
         getIgnitionStatus(),
         getChatTools(),
         getRAGStats(),
         getChatModels(),
+        getChatConfig(),
       ]);
       if (s.status === 'fulfilled') setStatus(s.value);
       if (t.status === 'fulfilled') setTools(t.value?.tools || []);
       if (r.status === 'fulfilled') setRagStats(r.value);
       if (m.status === 'fulfilled') setModels(m.value?.models || []);
+      if (c.status === 'fulfilled') setChatConfig(c.value);
     } catch (err) {
       console.error('Status fetch error:', err);
     } finally {
@@ -94,7 +97,7 @@ export default function SystemStatus() {
             header={
               <div className="flex items-center gap-2">
                 <Cpu size={16} className="t-accent" />
-                <span className="font-semibold t-text">Ollama LLM</span>
+                <span className="font-semibold t-text">LLM Provider</span>
                 <span className="ml-auto">
                   {models.length > 0 ? <Badge color="success">Online</Badge> : <Badge color="error">Offline</Badge>}
                 </span>
@@ -104,7 +107,8 @@ export default function SystemStatus() {
           >
             {models.length > 0 ? (
               <div className="space-y-2 text-sm">
-                <InfoRow icon={<Globe size={13} className="t-text-m" />} label="URL" value="http://localhost:11434" />
+                <InfoRow label="Provider" value={chatConfig?.provider || 'ollama'} />
+                <InfoRow icon={<Globe size={13} className="t-text-m" />} label="URL" value={chatConfig?.baseUrl || chatConfig?.ollamaUrl || '-'} />
                 <InfoRow label="Models" value={`${models.length} available`} />
                 <div className="mt-2 space-y-1">
                   {models.map((m, i) => (
@@ -117,7 +121,7 @@ export default function SystemStatus() {
                 </div>
               </div>
             ) : (
-              <p className="t-err text-sm">Cannot connect to Ollama</p>
+              <p className="t-err text-sm">Cannot connect to configured LLM provider</p>
             )}
           </Card>
 
@@ -185,7 +189,7 @@ export default function SystemStatus() {
             </div>
             <div className="t-bg-alt rounded-lg p-4 border t-border-s">
               <div className="t-text font-medium">Node.js Backend</div>
-              <div className="t-text-m text-xs">:3001 | Express + Ollama</div>
+              <div className="t-text-m text-xs">:3001 | Express + LLM API</div>
             </div>
             <div className="t-bg-alt rounded-lg p-4 border t-border-s">
               <div className="t-text font-medium">Ignition Gateway</div>
@@ -198,8 +202,8 @@ export default function SystemStatus() {
           </div>
           <div className="grid grid-cols-2 gap-3 mt-3 text-center text-sm">
             <div className="t-bg-alt rounded-lg p-3 border t-border-s">
-              <div className="t-text font-medium text-xs">Ollama LLM</div>
-              <div className="t-text-m text-xs">:11434 | llama3.2:3b</div>
+              <div className="t-text font-medium text-xs">LLM Provider</div>
+              <div className="t-text-m text-xs">Runtime-configurable</div>
             </div>
             <div className="t-bg-alt rounded-lg p-3 border t-border-s">
               <div className="t-text font-medium text-xs">RAG Knowledge Base</div>

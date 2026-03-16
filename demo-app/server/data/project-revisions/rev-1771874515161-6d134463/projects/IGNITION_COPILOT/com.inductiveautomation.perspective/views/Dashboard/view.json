@@ -1,0 +1,75 @@
+{
+  "custom": {},
+  "params": {
+    "assetPath": ""
+  },
+  "props": {},
+  "root": {
+    "type": "ia.container.flex",
+    "props": {
+      "direction": "column",
+      "style": {
+        "gap": "12px",
+        "padding": "16px"
+      }
+    },
+    "meta": {
+      "name": "root"
+    },
+    "position": {},
+    "children": [
+      {
+        "type": "ia.display.label",
+        "props": {
+          "text": "Detail View",
+          "style": {
+            "fontSize": "20px",
+            "fontWeight": "bold"
+          }
+        },
+        "meta": {
+          "name": "header"
+        }
+      },
+      {
+        "type": "ia.container.flex",
+        "props": {
+          "direction": "row",
+          "style": {
+            "gap": "12px"
+          }
+        },
+        "meta": {
+          "name": "content-row"
+        },
+        "children": [
+          {
+            "type": "ia.container.flex",
+            "props": {
+              "direction": "column",
+              "style": {
+                "flex": "1"
+              }
+            },
+            "meta": {
+              "name": "properties-panel"
+            },
+            "children": []
+          },
+          {
+            "type": "ia.chart.easy-chart",
+            "props": {
+              "style": {
+                "flex": "2",
+                "height": "300px"
+              }
+            },
+            "meta": {
+              "name": "chart"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

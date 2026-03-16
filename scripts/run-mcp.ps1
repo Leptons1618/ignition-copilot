@@ -2,7 +2,8 @@ $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
 $mcp = Join-Path $root "mcp-server"
-$venvPy = Join-Path $mcp ".venv\Scripts\python.exe"
+$runningOnWindows = $IsWindows -or ($PSVersionTable.PSVersion.Major -le 5)
+$venvPy = if ($runningOnWindows) { (Join-Path $mcp ".venv\Scripts\python.exe") } else { (Join-Path $mcp ".venv/bin/python") }
 $logsDir = Join-Path $PSScriptRoot ".logs"
 $pidsFile = Join-Path $PSScriptRoot ".pids.json"
 

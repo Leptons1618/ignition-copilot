@@ -17,7 +17,8 @@ export async function sendChat(messages, sessionId = 'default', options = {}) {
  */
 export function streamChat(messages, sessionId = 'default', options = {}, onEvent) {
   const controller = new AbortController();
-  const ACTIVITY_TIMEOUT_MS = 60000;
+  const ACTIVITY_TIMEOUT_MS = 180000;
+  const timeoutSec = Math.round(ACTIVITY_TIMEOUT_MS / 1000);
 
   (async () => {
     let activityTimer;
@@ -25,7 +26,7 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
       clearTimeout(activityTimer);
       activityTimer = setTimeout(() => {
         controller.abort();
-        onEvent({ type: 'error', data: { message: 'Response timed out after 60s. The LLM may be unavailable or overloaded.' } });
+        onEvent({ type: 'error', data: { message: `Response timed out after ${timeoutSec}s. The LLM may be unavailable or overloaded.` } });
       }, ACTIVITY_TIMEOUT_MS);
     };
 
@@ -88,6 +89,11 @@ export function streamChat(messages, sessionId = 'default', options = {}, onEven
 
 export async function getIgnitionStatus() {
   const res = await fetch(`${API}/ignition/status`);
+  return res.json();
+}
+
+export async function getTagProviders() {
+  const res = await fetch(`${API}/ignition/providers`);
   return res.json();
 }
 
@@ -252,5 +258,139 @@ export async function updateServiceConfig(config) {
 
 export async function testServiceConnections() {
   const res = await fetch(`${API}/config/services/test`, { method: 'POST' });
+  return res.json();
+}
+
+export async function getSetupStatus() {
+  const res = await fetch(`${API}/config/setup/status`);
+  return res.json();
+}
+
+export async function updateSetupChecklist(checklist) {
+  const res = await fetch(`${API}/config/setup/checklist`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ checklist }),
+  });
+  return res.json();
+}
+
+export async function verifySetup() {
+  const res = await fetch(`${API}/config/setup/verify`, { method: 'POST' });
+  return res.json();
+}
+
+export async function getBackendRequestLogs(count = 50) {
+  const res = await fetch(`${API}/logs/requests?count=${encodeURIComponent(count)}`);
+  return res.json();
+}
+
+export async function getFrontendEventLogs(count = 50) {
+  const res = await fetch(`${API}/logs/frontend?count=${encodeURIComponent(count)}`);
+  return res.json();
+}
+
+export async function createProject(payload) {
+  const res = await fetch(`${API}/projects`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+export async function updateProject(project, payload) {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+export async function deleteProject(project) {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}`, { method: 'DELETE' });
+  return res.json();
+}
+
+export async function createScript(project, path, content = '') {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/scripts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  return res.json();
+}
+
+export async function updateScript(project, path, content = '') {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/script`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, content }),
+  });
+  return res.json();
+}
+
+export async function deleteScript(project, path) {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/script?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  });
+  return res.json();
+}
+
+export async function getNamedQuery(project, path) {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/named-query?path=${encodeURIComponent(path)}`);
+  return res.json();
+}
+
+export async function createNamedQuery(project, path, sql = '') {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/named-queries`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, sql }),
+  });
+  return res.json();
+}
+
+export async function updateNamedQuery(project, path, sql = '') {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/named-query`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path, sql }),
+  });
+  return res.json();
+}
+
+export async function deleteNamedQuery(project, path) {
+  const res = await fetch(`${API}/projects/${encodeURIComponent(project)}/named-query?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+  });
+  return res.json();
+}
+
+export async function planProjectChanges(project, instruction, operations = null) {
+  const res = await fetch(`${API}/projects/ai/plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project, instruction, operations }),
+  });
+  return res.json();
+}
+
+export async function applyProjectChanges(planId) {
+  const res = await fetch(`${API}/projects/ai/apply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId }),
+  });
+  return res.json();
+}
+
+export async function revertProjectChanges(revisionId) {
+  const res = await fetch(`${API}/projects/ai/revert`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ revisionId }),
+  });
   return res.json();
 }

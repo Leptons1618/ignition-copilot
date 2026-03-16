@@ -9,6 +9,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $demo = Join-Path $root "demo-app"
 $logsDir = Join-Path $PSScriptRoot ".logs"
 $pidsFile = Join-Path $PSScriptRoot ".pids.json"
+$runningOnWindows = $IsWindows -or ($PSVersionTable.PSVersion.Major -le 5)
+$npmCmd = if ($runningOnWindows) { "npm.cmd" } else { "npm" }
 
 New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 
@@ -31,10 +33,15 @@ function Wait-Port {
 function Get-PortOwnerPid {
   param([int]$Port)
   try {
-    $line = netstat -ano | Select-String (":{0}\s+.*LISTENING\s+(\d+)$" -f $Port) | Select-Object -First 1
-    if (-not $line) { return $null }
-    $m = [regex]::Match($line.ToString(), "LISTENING\s+(\d+)$")
-    if ($m.Success) { return [int]$m.Groups[1].Value }
+    if ($runningOnWindows) {
+      $line = netstat -ano | Select-String (":{0}\s+.*LISTENING\s+(\d+)$" -f $Port) | Select-Object -First 1
+      if (-not $line) { return $null }
+      $m = [regex]::Match($line.ToString(), "LISTENING\s+(\d+)$")
+      if ($m.Success) { return [int]$m.Groups[1].Value }
+    } else {
+      $pid = (lsof -ti :$Port 2>$null | Select-Object -First 1)
+      if ($pid) { return [int]$pid }
+    }
   } catch {}
   return $null
 }
@@ -45,7 +52,7 @@ if (Test-Path $pidsFile) {
 }
 
 Push-Location $demo
-$distDir = Join-Path $demo "client\\dist"
+$distDir = Join-Path $demo "client/dist"
 if ($RebuildFrontend) {
   Write-Host "Building frontend for static serving..." -ForegroundColor Cyan
   npm run build
@@ -75,7 +82,7 @@ if (Get-PortOwnerPid -Port 3001) {
 Write-Host "Starting demo backend (serves built frontend)..." -ForegroundColor Cyan
 $serverOut = Join-Path $logsDir "demo-server.out.log"
 $serverErr = Join-Path $logsDir "demo-server.err.log"
-$server = Start-Process -FilePath "npm.cmd" -ArgumentList "run","server" -WorkingDirectory $demo -PassThru `
+$server = Start-Process -FilePath $npmCmd -ArgumentList "run","server" -WorkingDirectory $demo -PassThru `
   -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr
 $pids.demoServerPid = $server.Id
 
@@ -83,7 +90,7 @@ if ($UseViteClient) {
   Write-Host "Starting Vite client dev server..." -ForegroundColor Cyan
   $clientOut = Join-Path $logsDir "demo-client.out.log"
   $clientErr = Join-Path $logsDir "demo-client.err.log"
-  $client = Start-Process -FilePath "npm.cmd" -ArgumentList "run","client" -WorkingDirectory $demo -PassThru `
+  $client = Start-Process -FilePath $npmCmd -ArgumentList "run","client" -WorkingDirectory $demo -PassThru `
     -RedirectStandardOutput $clientOut -RedirectStandardError $clientErr
   $pids.demoClientPid = $client.Id
 }

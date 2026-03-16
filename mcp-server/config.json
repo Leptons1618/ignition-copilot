@@ -6,7 +6,7 @@
     "verify_ssl": false,
     "timeout": 30,
     "project": "ignition-copilot",
-    "ignition_api": "Test:zzX-CVaiOYnuQ5xgn3z00MOyAbVGDNvSU2LaiR5Ltlw"
+    "ignition_api": "IGNITION_ARCH_API:M1x5PY7fUM3Gq-qL7COvwqXC0W1auID-uYFGr1sn6zo"
   },
   "mcp": {
     "server_name": "ignition-mcp",

@@ -1,0 +1,14 @@
+{
+  "pages": {
+    "/": {
+      "title": "",
+      "viewPath": "Dashboard"
+    },
+    "/dashboard": {
+      "viewPath": "Dashboard"
+    }
+  },
+  "sharedDocks": {
+    "cornerPriority": "top-bottom"
+  }
+}

@@ -1,5 +1,6 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
+$runningOnWindows = $IsWindows -or ($PSVersionTable.PSVersion.Major -le 5)
 
 $env:PYTHONIOENCODING = "utf-8"
 
@@ -24,7 +25,7 @@ try {
 }
 
 $mcp = Join-Path $root "mcp-server"
-$venvPy = Join-Path $mcp ".venv\Scripts\python.exe"
+$venvPy = if ($runningOnWindows) { (Join-Path $mcp ".venv\Scripts\python.exe") } else { (Join-Path $mcp ".venv/bin/python") }
 if (Test-Path $venvPy) {
   Write-Host "Running MCP basic tests..." -ForegroundColor Yellow
   Push-Location $mcp

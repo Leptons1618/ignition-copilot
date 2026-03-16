@@ -25,9 +25,13 @@ router.use(async (req, res, next) => {
 // POST /api/rag/search - Search documentation
 router.post('/search', async (req, res) => {
   try {
-    const { query, topK = 5 } = req.body;
+    const { query, topK = 5, minScore = -1, maxChars = 1000 } = req.body;
     if (!query) return res.status(400).json({ error: 'query required' });
-    const results = await searchDocs(query, topK);
+    const started = Date.now();
+    const results = await searchDocs(query, topK, { minScore, maxChars });
+    if (Date.now() - started > 500) {
+      console.warn('[rag:route] slow search', { query, ms: Date.now() - started });
+    }
     res.json(results);
   } catch (err) {
     res.status(500).json({ error: err.message });

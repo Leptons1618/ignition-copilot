@@ -1,0 +1,29 @@
+{
+  "revisionId": "rev-1771874515161-6d134463",
+  "planId": "plan-1771874513896-e4e367a2",
+  "project": "IGNITION_COPILOT",
+  "createdAt": "2026-02-23T19:21:55.189Z",
+  "operations": [
+    {
+      "type": "create_view",
+      "project": "IGNITION_COPILOT",
+      "path": "SystemTags",
+      "template": "detail"
+    }
+  ],
+  "snapshots": {
+    "IGNITION_COPILOT": {
+      "existed": true
+    }
+  },
+  "tagRollback": [],
+  "results": [
+    {
+      "type": "create_view",
+      "project": "IGNITION_COPILOT",
+      "result": {
+        "path": "SystemTags"
+      }
+    }
+  ]
+}
