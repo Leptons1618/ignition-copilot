@@ -107,8 +107,13 @@ test('local setup flow supports manual checklist and verification', async ({ pag
   await page.getByTestId('settings-llm-base-url').fill('http://localhost:11434');
   await page.getByTestId('settings-llm-model').fill('llama3.2:3b');
 
-  await page.getByTestId('settings-manual-ignitionScriptsInstalled').check();
-  await page.getByTestId('settings-manual-mcpConfigured').check();
+  const checklistReq1 = page.waitForRequest('**/api/config/setup/checklist');
+  await page.getByTestId('settings-manual-ignitionScriptsInstalled').click();
+  await checklistReq1;
+
+  const checklistReq2 = page.waitForRequest('**/api/config/setup/checklist');
+  await page.getByTestId('settings-manual-mcpConfigured').click();
+  await checklistReq2;
 
   await page.getByTestId('settings-verify-setup').click();
   await expect(page.getByText('Verification Results')).toBeVisible();
