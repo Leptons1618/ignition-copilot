@@ -22,6 +22,8 @@ import { requestLogger } from './middleware/logger.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IGNITION_URL = process.env.IGNITION_URL || 'http://localhost:8088';
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -64,7 +66,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\nIgnition Copilot Demo Server running on http://localhost:${PORT}`);
-  console.log('Ignition Gateway: http://localhost:8088');
-  console.log('Ollama: http://localhost:11434');
+  console.log(`Ignition Gateway: ${IGNITION_URL}`);
+  console.log(`Ollama: ${OLLAMA_URL}`);
   console.log('React UI: http://localhost:3000 (dev mode)\n');
 });

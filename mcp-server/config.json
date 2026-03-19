@@ -5,7 +5,7 @@
     "password": "developer",
     "verify_ssl": false,
     "timeout": 30,
-    "project": "ignition-copilot",
+    "project": "IGNITION_COPILOT",
     "ignition_api": "IGNITION_ARCH_API:M1x5PY7fUM3Gq-qL7COvwqXC0W1auID-uYFGr1sn6zo"
   },
   "mcp": {

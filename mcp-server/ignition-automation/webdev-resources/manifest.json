@@ -1,0 +1,23 @@
+{
+  "generatedAt": "2026-03-19T22:06:46.978077+00:00",
+  "project": "IGNITION_COPILOT",
+  "resourcePath": "/system/webdev/IGNITION_COPILOT/<resource>",
+  "resourceNames": [
+    "tag_browse",
+    "tag_read",
+    "tag_write",
+    "tag_search",
+    "tag_config",
+    "tag_delete",
+    "history_query",
+    "alarm_active",
+    "alarm_journal",
+    "system_info",
+    "script_exec"
+  ],
+  "notes": [
+    "Create one WebDev resource per name under system/webdev/<project>/.",
+    "Paste each corresponding script file into the resource's script editor.",
+    "Save and publish the project, then run mcp-server/test_endpoints.py."
+  ]
+}

@@ -8,6 +8,7 @@ Generic — no hardcoded tag paths. All tool routing driven by TOOL_NAMES lists.
 import sys
 import json
 import logging
+import os
 from typing import Any, Dict, List
 from pathlib import Path
 
@@ -63,6 +64,18 @@ class IgnitionMCPServer:
         # Load configuration
         with open(config_path, 'r') as f:
             self.config = json.load(f)
+
+        # Allow environment-specific overrides (useful for Docker vs host runs).
+        ig_cfg = self.config.setdefault('ignition', {})
+        env_overrides = {
+            'gateway_url': os.getenv('IGNITION_URL'),
+            'username': os.getenv('IGNITION_USER'),
+            'password': os.getenv('IGNITION_PASS'),
+            'project': os.getenv('IGNITION_PROJECT'),
+        }
+        for key, value in env_overrides.items():
+            if value:
+                ig_cfg[key] = value
 
         # Initialize Ignition client
         ig = self.config['ignition']

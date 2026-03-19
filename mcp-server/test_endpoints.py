@@ -8,6 +8,8 @@ import requests
 import json
 import sys
 import warnings
+import os
+from urllib.parse import urlparse
 
 warnings.filterwarnings('ignore')
 
@@ -15,9 +17,41 @@ warnings.filterwarnings('ignore')
 with open('config.json') as f:
     cfg = json.load(f)
 
-BASE = cfg['ignition']['gateway_url'].rstrip('/')
-PROJECT = cfg['ignition'].get('project', 'ignition-copilot')
-AUTH = (cfg['ignition']['username'], cfg['ignition']['password'])
+BASE = os.getenv('IGNITION_URL', cfg['ignition']['gateway_url']).rstrip('/')
+PROJECT = os.getenv('IGNITION_PROJECT', cfg['ignition'].get('project', 'ignition-copilot'))
+AUTH = (
+    os.getenv('IGNITION_USER', cfg['ignition']['username']),
+    os.getenv('IGNITION_PASS', cfg['ignition']['password']),
+)
+URL = lambda res: f"{BASE}/system/webdev/{PROJECT}/{res}"
+
+
+def _try_get(url, auth, timeout=5):
+    return requests.get(url, auth=auth, verify=False, timeout=timeout)
+
+
+def normalize_base_for_host(base, auth):
+    """Fallback host.docker.internal to localhost when running tests on host."""
+    parsed = urlparse(base)
+    if parsed.hostname != 'host.docker.internal':
+        return base
+
+    try:
+        _try_get(base, auth, timeout=3)
+        return base
+    except requests.exceptions.RequestException:
+        host = 'localhost'
+        if ':' in parsed.netloc:
+            _, port = parsed.netloc.rsplit(':', 1)
+            netloc = f"{host}:{port}"
+        else:
+            netloc = host
+        fallback = parsed._replace(netloc=netloc).geturl().rstrip('/')
+        print(f"[INFO] host.docker.internal unreachable from host; using fallback {fallback}")
+        return fallback
+
+
+BASE = normalize_base_for_host(BASE, AUTH)
 URL = lambda res: f"{BASE}/system/webdev/{PROJECT}/{res}"
 
 PASS = 0

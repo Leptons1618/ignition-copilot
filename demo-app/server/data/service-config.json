@@ -1,10 +1,13 @@
 {
-  "llmProvider": "none",
-  "llmBaseUrl": "",
-  "llmModel": "",
-  "ollamaUrl": "",
+  "llmProvider": "ollama",
+  "llmBaseUrl": "http://localhost:11434",
+  "llmModel": "qwen3-vl:4b",
+  "ollamaUrl": "http://localhost:11434",
   "ignitionUrl": "http://localhost:8088",
-  "ignitionProject": "ignition-copilot",
+  "ignitionProject": "IGNITION_COPILOT",
   "ignitionUser": "anish",
-  "setupChecklist": {}
+  "setupChecklist": {
+    "ignitionScriptsInstalled": true,
+    "mcpConfigured": true
+  }
 }

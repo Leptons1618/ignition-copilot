@@ -248,9 +248,16 @@ class IgnitionClient:
     # ------------------------------------------------------------------ #
 
     def test_connection(self) -> bool:
-        """Quick connectivity check — tries to hit the gateway root."""
+        """Quick connectivity check that validates reachability, not auth success."""
         try:
-            resp = self.session.get(self.gateway_url, timeout=self.timeout)
-            return resp.status_code == 200
+            # StatusPing is the most reliable health endpoint on Ignition gateways.
+            status_ping = f"{self.gateway_url}/StatusPing"
+            resp = self.session.get(status_ping, timeout=self.timeout, allow_redirects=True)
+            if resp.status_code < 500:
+                return True
+
+            # Fallback to root gateway check for older/edge deployments.
+            root = self.session.get(self.gateway_url, timeout=self.timeout, allow_redirects=True)
+            return root.status_code < 500
         except Exception:
             return False
